@@ -6,6 +6,23 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::network::message::Message;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NodeStats {
+    pub recvd_count: u64,
+    pub sent_count: u64,
+}
+
+impl fmt::Display for NodeStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Packets recieved: {}\nPackets sent: {}\n",
+            self.recvd_count, self.sent_count
+        )
+    }
+}
+
+// Node strucure representing a peer or participant in the network
 pub struct Node {
     id: String,
     address: Ipv4Addr,
@@ -13,22 +30,32 @@ pub struct Node {
     from_network: mpsc::Receiver<Message>,
     kill_signal: broadcast::Receiver<()>,
 
-    recvd_count: u64,
-    sent_count: u64,
+    pub stats: NodeStats,
 }
 
 impl Node {
+    // Constructs a new node with the provided addresss.
+    // Also takes in the write end for an mpsc channel used to
+    // send messages to the network, as well as the reciever for
+    // the broadccast channel where the kill signal will be sent at
+    // program shutdown
+    //
+    // Returns the constructed node as well as the write end of the mpsc
+    // channel where the node will be recieving messages
     pub fn new(
         address: Ipv4Addr,
         to_network: mpsc::Sender<Message>,
         kill_signal: broadcast::Receiver<()>,
     ) -> (Self, mpsc::Sender<Message>) {
+        // Create a random alphanumeric ID for the node
         let rng = rand::rng();
         let id: String = rng
             .sample_iter(rand::distr::Alphanumeric)
             .take(5)
             .map(|c| c as char)
             .collect();
+
+        // Build the mpsc channel where the channel will be recieving messages from
         let (tx, rx) = mpsc::channel(100);
 
         let node = Node {
@@ -37,8 +64,7 @@ impl Node {
             to_network,
             from_network: rx,
             kill_signal,
-            recvd_count: 0,
-            sent_count: 0,
+            stats: NodeStats::default(),
         };
 
         (node, tx)
@@ -48,15 +74,21 @@ impl Node {
         &self.id
     }
 
+    pub fn ip(&self) -> Ipv4Addr {
+        self.address.clone()
+    }
+
     pub async fn send_to(&mut self, destination: Ipv4Addr, message: &[u8]) -> Result<()> {
         let message = Message::new(self.address, destination, message);
 
         self.to_network.send(message).await?;
+        self.stats.sent_count += 1;
 
         Ok(())
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    // Main run loop of for the node
+    pub async fn run(&mut self) -> Result<NodeStats> {
         loop {
             tokio::select! {
                 _ = self.kill_signal.recv() => {
@@ -71,12 +103,12 @@ impl Node {
 
                     println!("message from {}", message.source());
 
-                    self.recvd_count += 1;
+                    self.stats.recvd_count += 1;
                 },
             }
         }
 
-        Ok(())
+        Ok(self.stats)
     }
 }
 
