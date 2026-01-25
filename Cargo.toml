@@ -5,6 +5,10 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
+env_logger = "0.11.8"
+futures = "0.3.31"
 ipnet = "2.11.0"
+libp2p = { version = "0.56.0", features = ["identify", "kad", "macros", "noise", "serde", "tokio", "yamux"] }
+log = "0.4.29"
 rand = "0.9.2"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }

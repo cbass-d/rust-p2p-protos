@@ -1,5 +1,16 @@
 use anyhow::{Result, anyhow};
 use ipnet::Ipv4AddrRange;
+use libp2p::{
+    Multiaddr, PeerId, Transport,
+    core::{
+        muxing::StreamMuxerBox,
+        transport::{MemoryTransport, upgrade},
+    },
+    identify, identity,
+    multiaddr::Protocol,
+    noise, yamux,
+};
+use log::info;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -56,7 +67,8 @@ impl NodeNetwork {
     // IP addresses left to assign
     pub fn add_node(&mut self) -> Result<Node> {
         if let Some(ip) = self.ips.next() {
-            let (node, tx) = Node::new(ip, self.tx.clone(), self.kill_signal.resubscribe());
+            let (node, tx) =
+                Node::new(ip, self.tx.clone(), self.kill_signal.resubscribe()).unwrap();
 
             self.nodes.insert(ip, tx);
 
@@ -66,10 +78,56 @@ impl NodeNetwork {
         }
     }
 
+    fn connect_two_nodes(&mut self, mut node_one: Node, node_two: &mut Node) -> Node {
+        node_one.add_peer(node_two.listen_address.clone());
+
+        node_one
+    }
+
     // Main run loop of for the node
     pub async fn run(&mut self) -> Result<()> {
+        info!(target: "node_network", "node network running");
+
         // JoinSet for the aysnc tasks running the nodes
-        let mut task_set: JoinSet<()> = JoinSet::new();
+        let mut node_task_set: JoinSet<()> = JoinSet::new();
+
+        // Segment the nodes into two sections
+        // section #1 [1, 2]
+        // secion #2 [3, 4, 5]
+        // node 2 and 3 will know each other and act as
+        // the bridge between the two
+        let node_one = self.add_node().unwrap();
+        let mut node_two = self.add_node().unwrap();
+        let mut node_three = self.add_node().unwrap();
+        let node_four = self.add_node().unwrap();
+        let node_five = self.add_node().unwrap();
+
+        let mut node_one = self.connect_two_nodes(node_one, &mut node_two);
+        let mut node_two = self.connect_two_nodes(node_two, &mut node_three);
+
+        let mut node_three = self.connect_two_nodes(node_three, &mut node_two);
+        let mut node_four = self.connect_two_nodes(node_four, &mut node_three);
+        let mut node_five = self.connect_two_nodes(node_five, &mut node_four);
+
+        node_task_set.spawn(async move {
+            let _ = node_one.run().await;
+        });
+
+        node_task_set.spawn(async move {
+            let _ = node_two.run().await;
+        });
+
+        node_task_set.spawn(async move {
+            let _ = node_three.run().await;
+        });
+
+        node_task_set.spawn(async move {
+            let _ = node_four.run().await;
+        });
+
+        node_task_set.spawn(async move {
+            let _ = node_five.run().await;
+        });
 
         loop {
             tokio::select! {
@@ -93,8 +151,10 @@ impl NodeNetwork {
             }
         }
 
+        info!(target: "node", "network now shutting down...");
+
         // Wait for all the nodes to finish
-        let _ = task_set.join_all().await;
+        let _ = node_task_set.join_all().await;
 
         Ok(())
     }
@@ -167,6 +227,7 @@ mod tests {
         let (mut node_one, mut node_two) = add_two_nodes_to_network(&mut network);
 
         let node_one_ip = node_one.ip();
+        let node_one_stats = node_one.stats.clone();
 
         // The network needs to be running in order to route the
         // message between the two nodes
@@ -184,16 +245,16 @@ mod tests {
         });
 
         let _ = node_two.send_to(node_one_ip, b"test").await.unwrap();
-        assert_eq!(node_two.stats.sent_count, 1);
+        assert_eq!(node_two.stats.lock().unwrap().sent_count, 1);
 
         // We need to add a small sleep to allow for the node to recieve and
         // process the message before sending the kill signal
         tokio::time::sleep(Duration::from_millis(100)).await;
         tx.send(()).unwrap();
 
-        let node_one_stats = node_one_handle.await.unwrap().unwrap();
+        let _ = node_one_handle.await.unwrap();
         let _ = network_handle.await.unwrap();
 
-        assert_eq!(node_one_stats.recvd_count, 1)
+        assert_eq!(node_one_stats.lock().unwrap().recvd_count, 1);
     }
 }
