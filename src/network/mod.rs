@@ -10,7 +10,6 @@ use libp2p::{
     multiaddr::Protocol,
     noise, yamux,
 };
-use log::info;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -19,6 +18,7 @@ use tokio::{
     sync::{broadcast, mpsc},
     task::JoinSet,
 };
+use tracing::{info, instrument};
 
 use message::Message;
 
@@ -33,6 +33,7 @@ pub mod message;
 // mpsc channel where messages will be sent.
 // The network maintains its own mpsc channel where it recieves messages
 // from nodes to pass/forward to the destination node found in the message.
+#[derive(Debug)]
 pub struct NodeNetwork {
     nodes: HashMap<Ipv4Addr, mpsc::Sender<Message>>,
     from_nodes: mpsc::Receiver<Message>,
@@ -85,6 +86,7 @@ impl NodeNetwork {
     }
 
     // Main run loop of for the node
+    #[instrument(skip(self), name = "run network")]
     pub async fn run(&mut self) -> Result<()> {
         info!(target: "node_network", "node network running");
 
@@ -151,7 +153,7 @@ impl NodeNetwork {
             }
         }
 
-        info!(target: "node", "network now shutting down...");
+        info!(target: "node_network", "network now shutting down...");
 
         // Wait for all the nodes to finish
         let _ = node_task_set.join_all().await;
@@ -226,7 +228,7 @@ mod tests {
 
         let (mut node_one, mut node_two) = add_two_nodes_to_network(&mut network);
 
-        let node_one_ip = node_one.ip();
+        let node_one_ip = node_one.ip_address;
         let node_one_stats = node_one.stats.clone();
 
         // The network needs to be running in order to route the

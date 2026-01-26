@@ -15,15 +15,15 @@ use libp2p::{
     multiaddr::Protocol,
     noise, swarm, yamux,
 };
-use log::{debug, info, warn};
 use rand::prelude::*;
 use std::{
     net::Ipv4Addr,
     sync::{Arc, Mutex},
 };
 use tokio::sync::{broadcast, mpsc};
+use tracing::{debug, info, instrument, trace, warn};
 
-use crate::{network::message::Message, node::behaviour::NodeBehaviour};
+use crate::{network::message::Message, node::behaviour::NodeBehaviour, utils::split_peer_id};
 
 const IPFS_KAD_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
@@ -46,12 +46,14 @@ impl fmt::Display for NodeStats {
 
 // Node strucure representing a peer or participant in the network
 pub struct Node {
-    id: String,
-    address: Ipv4Addr,
+    pub peer_id: PeerId,
+    pub ip_address: Ipv4Addr,
     to_network: mpsc::Sender<Message>,
     from_network: mpsc::Receiver<Message>,
     kill_signal: broadcast::Receiver<()>,
     known_peers: Vec<Multiaddr>,
+
+    // libp2p swarm listen address
     pub listen_address: Multiaddr,
 
     swarm: Swarm<NodeBehaviour>,
@@ -73,14 +75,6 @@ impl Node {
         to_network: mpsc::Sender<Message>,
         kill_signal: broadcast::Receiver<()>,
     ) -> Result<(Self, mpsc::Sender<Message>)> {
-        // Create a random alphanumeric ID for the node
-        let rng = rand::rng();
-        let id: String = rng
-            .sample_iter(rand::distr::Alphanumeric)
-            .take(5)
-            .map(|c| c as char)
-            .collect();
-
         // Build the mpsc channel where the channel will be recieving messages from
         let (tx, rx) = mpsc::channel(100);
 
@@ -111,8 +105,8 @@ impl Node {
         );
 
         let node = Node {
-            id,
-            address,
+            peer_id,
+            ip_address: address,
             to_network,
             from_network: rx,
             kill_signal,
@@ -129,16 +123,8 @@ impl Node {
         self.known_peers.push(peer);
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    pub fn ip(&self) -> Ipv4Addr {
-        self.address.clone()
-    }
-
     pub async fn send_to(&mut self, destination: Ipv4Addr, message: &[u8]) -> Result<()> {
-        let message = Message::new(self.address, destination, message);
+        let message = Message::new(self.ip_address, destination, message);
 
         self.to_network.send(message).await?;
         self.stats.lock().unwrap().sent_count += 1;
@@ -147,8 +133,12 @@ impl Node {
     }
 
     // Main run loop of for the node
+    #[instrument(skip(self), fields(id = %self.peer_id), name = "run node")]
     pub async fn run(&mut self) -> Result<()> {
-        info!(target: "node", "node {} now running with ipv4 addresss {}", self.id, self.address);
+        info!(target: "node",
+            "node {} now running with ipv4 addresss {}",
+            self.peer_id, self.ip_address
+        );
 
         self.swarm.listen_on(self.listen_address.clone())?;
 
@@ -160,17 +150,12 @@ impl Node {
         for addr in &self.known_peers {
             if self.swarm.dial(addr.clone()).is_ok() {
                 debug!(target: "node", "successully dialed peer {addr}");
-                //if let Some((peer_id, addr)) = split_peer_id(addr.clone()) {
-                //    self.swarm
-                //        .behaviour_mut()
-                //        .kademlia
-                //        .add_address(&peer_id, addr);
-                //    dialed += 1;
-                //}
+                dialed += 1
             } else {
                 warn!(target: "node", "failed to dial peer {addr}");
             }
         }
+        info!(target: "node", "dialed a total of {} peers", dialed);
 
         loop {
             tokio::select! {
@@ -184,19 +169,19 @@ impl Node {
 
                     let message = message.unwrap();
 
-                    println!("message from {}", message.source());
+                    debug!(target: "node", "message from {}", message.source());
 
                     self.stats.lock().unwrap().recvd_count+= 1;
                 },
 
                 Some(event) = self.swarm.next() => {
-                    info!(target: "node", "node swarm event {:?}", event);
+                    trace!("node swarm event {:?}", event);
                 },
 
             }
         }
 
-        info!(target: "node", "node {} now shutting down", self.id);
+        info!(target: "node", "node {} now shutting down", self.peer_id);
 
         Ok(())
     }
@@ -208,23 +193,6 @@ impl Node {
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Node: {}", self.id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tokio::sync::{broadcast, mpsc};
-
-    use crate::node::Node;
-
-    #[test]
-    pub fn test_valid_node_id() {
-        let (tx, _) = mpsc::channel(1);
-        let (_, rx) = broadcast::channel::<()>(1);
-        let (node, _) = Node::new("10.0.0.1".parse().unwrap(), tx, rx).unwrap();
-
-        assert_eq!(node.id().len(), 5);
-        assert!(node.id().chars().into_iter().all(|c| c.is_alphanumeric()));
+        write!(f, "Node: {}", self.peer_id)
     }
 }
