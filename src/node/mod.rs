@@ -1,32 +1,53 @@
 mod behaviour;
+mod history;
+mod identify_handler;
+mod kad_handler;
 
-use anyhow::{Result, anyhow};
+use color_eyre::eyre::Result;
 use core::fmt;
 use futures::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, Transport,
+    Multiaddr, PeerId, StreamProtocol, Swarm, Transport,
     core::{
-        muxing::StreamMuxerBox,
-        transport::{ListenerId, MemoryTransport, upgrade},
+        ConnectedPoint,
+        transport::{MemoryTransport, upgrade},
     },
-    identify::{self, Behaviour as Identify, Config as IdentifyConfig},
+    identify::{Behaviour as Identify, Config as IdentifyConfig},
     identity,
     kad::{Behaviour as Kademlia, store::MemoryStore},
     multiaddr::Protocol,
-    noise, swarm, yamux,
+    noise,
+    swarm::{self, SwarmEvent},
+    yamux,
 };
-use rand::prelude::*;
 use std::{
-    net::Ipv4Addr,
+    collections::HashSet,
     sync::{Arc, Mutex},
+    time::Duration,
 };
-use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, instrument, trace, warn};
+use tokio::{sync::mpsc, time::Instant};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{network::message::Message, node::behaviour::NodeBehaviour, utils::split_peer_id};
+use crate::{
+    messages::NetworkEvent,
+    network::message::Message,
+    node::{
+        behaviour::{NodeBehaviour, NodeNetworkEvent},
+        history::{MessageHistory, SwarmEventInfo},
+        kad_handler::KadQueries,
+    },
+};
 
 const IPFS_KAD_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
+const NODE_NETWORK_AGENT: &str = "node-network/0.1";
+
+#[derive(Debug, Clone)]
+pub enum NodeResult {
+    Success,
+    Error(String),
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NodeStats {
@@ -47,15 +68,18 @@ impl fmt::Display for NodeStats {
 // Node strucure representing a peer or participant in the network
 pub struct Node {
     pub peer_id: PeerId,
-    pub ip_address: Ipv4Addr,
     to_network: mpsc::Sender<Message>,
     from_network: mpsc::Receiver<Message>,
-    kill_signal: broadcast::Receiver<()>,
+    current_peers: HashSet<PeerId>,
     known_peers: Vec<Multiaddr>,
+
+    message_history: MessageHistory,
+    kad_queries: KadQueries,
 
     // libp2p swarm listen address
     pub listen_address: Multiaddr,
 
+    bootstrapped: bool,
     swarm: Swarm<NodeBehaviour>,
 
     pub stats: Arc<Mutex<NodeStats>>,
@@ -70,11 +94,7 @@ impl Node {
     //
     // Returns the constructed node as well as the write end of the mpsc
     // channel where the node will be recieving messages
-    pub fn new(
-        address: Ipv4Addr,
-        to_network: mpsc::Sender<Message>,
-        kill_signal: broadcast::Receiver<()>,
-    ) -> Result<(Self, mpsc::Sender<Message>)> {
+    pub fn new(to_network: mpsc::Sender<Message>) -> Result<(Self, mpsc::Sender<Message>)> {
         // Build the mpsc channel where the channel will be recieving messages from
         let (tx, rx) = mpsc::channel(100);
 
@@ -91,7 +111,8 @@ impl Node {
         let store = MemoryStore::new(peer_id);
         let kad = Kademlia::new(peer_id, store);
         let identify = {
-            let cfg = IdentifyConfig::new(IPFS_PROTO_NAME.to_string(), node_keys.public());
+            let cfg = IdentifyConfig::new(IPFS_PROTO_NAME.to_string(), node_keys.public())
+                .with_agent_version(NODE_NETWORK_AGENT.to_string());
 
             Identify::new(cfg)
         };
@@ -106,11 +127,13 @@ impl Node {
 
         let node = Node {
             peer_id,
-            ip_address: address,
             to_network,
             from_network: rx,
-            kill_signal,
+            current_peers: HashSet::new(),
             known_peers: vec![],
+            message_history: MessageHistory::default(),
+            kad_queries: KadQueries::default(),
+            bootstrapped: false,
             swarm,
             listen_address,
             stats: Arc::new(Mutex::new(NodeStats::default())),
@@ -123,22 +146,31 @@ impl Node {
         self.known_peers.push(peer);
     }
 
-    pub async fn send_to(&mut self, destination: Ipv4Addr, message: &[u8]) -> Result<()> {
-        let message = Message::new(self.ip_address, destination, message);
+    // pub async fn send_to(&mut self, destination: Ipv4Addr, message: &[u8]) -> Result<()> {
+    //     let message = Message::new(self.ip_address, destination, message);
 
-        self.to_network.send(message).await?;
-        self.stats.lock().unwrap().sent_count += 1;
+    //     self.to_network.send(message).await?;
+    //     self.stats.lock().unwrap().sent_count += 1;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     // Main run loop of for the node
-    #[instrument(skip(self), fields(id = %self.peer_id), name = "run node")]
-    pub async fn run(&mut self) -> Result<()> {
+    #[instrument(skip_all, fields(id = %self.peer_id), name = "run node")]
+    pub async fn run(
+        &mut self,
+        start: Instant,
+        network_event_tx: mpsc::Sender<NetworkEvent>,
+        cancellation_token: CancellationToken,
+    ) -> Result<NodeResult> {
         info!(target: "node",
-            "node {} now running with ipv4 addresss {}",
-            self.peer_id, self.ip_address
+            "node {} now running",
+            self.peer_id
         );
+
+        let _ = network_event_tx
+            .send(NetworkEvent::NodeRunning(self.peer_id))
+            .await;
 
         self.swarm.listen_on(self.listen_address.clone())?;
 
@@ -157,10 +189,17 @@ impl Node {
         }
         info!(target: "node", "dialed a total of {} peers", dialed);
 
+        if !self.known_peers.is_empty() {}
+
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+
         loop {
             tokio::select! {
-                _ = self.kill_signal.recv() => {
+                _ = cancellation_token.cancelled() => {
                     break;
+                },
+                _ = interval.tick() => {
+                        //self.display_messages();
                 },
                 message = self.from_network.recv() => {
                     if message.is_none() {
@@ -176,6 +215,60 @@ impl Node {
 
                 Some(event) = self.swarm.next() => {
                     trace!("node swarm event {:?}", event);
+                    match event {
+                        SwarmEvent::Dialing { peer_id, ..} => {
+                            debug!(target: "node", "dialing peer {:?}", peer_id);
+                        },
+                        SwarmEvent::NewListenAddr { listener_id, address, .. } => {
+                            let local_p2p_addr = address.clone()
+                                    .with_p2p(*self.swarm.local_peer_id()).unwrap();
+                            debug!(target: "node", "listening on p2p address {:?}", local_p2p_addr);
+
+                            self.message_history.add_swarm_event(SwarmEventInfo::NewListenAddr { listener_id, address }, Instant::now().duration_since(start).as_secs_f32());
+                        },
+                        SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                            debug!(target: "node", "new peer {} from {:?}", peer_id, endpoint);
+
+                            let peer_addr = match endpoint.clone() {
+                                ConnectedPoint::Dialer { address, ..} => address,
+                                ConnectedPoint::Listener { send_back_addr, ..} => send_back_addr,
+                            };
+                            self.swarm.behaviour_mut().kad.add_address(&peer_id, peer_addr);
+                            self.message_history.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
+
+                            if !self.bootstrapped {
+                                debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
+                                if let Ok(qid) = self.swarm.behaviour_mut().kad.bootstrap() {
+                                    debug!(target: "kademlia_events", "kademlia bootstrap started");
+                                    self.kad_queries.bootsrap_id = Some(qid);
+                                } else {
+                                    warn!(target: "kademlia_events", "initial kademlia bootstrap failed");
+                                }
+                            }
+                        },
+                        SwarmEvent::ConnectionClosed { peer_id, endpoint, cause, .. } => {
+                            debug!(target: "node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
+
+                            self.message_history.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
+
+                        },
+                        SwarmEvent::ListenerClosed { listener_id, addresses, .. } => {
+                            debug!(target: "node", "listener now closed");
+                            self.message_history.add_swarm_event(SwarmEventInfo::ListenerClosed { listener_id, addresses }, Instant::now().duration_since(start).as_secs_f32());
+                        }
+                        SwarmEvent::IncomingConnectionError { peer_id, error, ..} => {
+                                error!(target: "node", "incoming connection failed, peer {:?}: {error}", peer_id);
+                        },
+                        SwarmEvent::Behaviour(NodeNetworkEvent::Identify(event)) => {
+                            identify_handler::handle_event(self, event)?;
+                        },
+                        SwarmEvent::Behaviour(NodeNetworkEvent::Kademlia(event)) => {
+                            kad_handler::handle_event(self, event)?;
+                        },
+                        other => {
+                            debug!("new event: {:?}", other);
+                        }
+                    }
                 },
 
             }
@@ -183,7 +276,20 @@ impl Node {
 
         info!(target: "node", "node {} now shutting down", self.peer_id);
 
-        Ok(())
+        let _ = network_event_tx
+            .send(NetworkEvent::NodeStopped(self.peer_id))
+            .await;
+
+        Ok(NodeResult::Success)
+    }
+
+    pub fn display_messages(&self) {
+        info!(target: "node", "identify messages:");
+        self.message_history.display_identify_messages();
+        info!(target: "node", "kademlia messages:");
+        self.message_history.display_kademlia_messages();
+        info!(target: "node", "swarm messages:");
+        self.message_history.display_swarm_messages();
     }
 
     pub fn get_stats(&self) -> NodeStats {

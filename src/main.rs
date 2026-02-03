@@ -1,32 +1,27 @@
-use anyhow::Result;
+use color_eyre::eyre::Result;
 use network::NodeNetwork;
-use std::{fs::File, net::Ipv4Addr};
-use tokio::{sync::broadcast, task::JoinSet};
-use tracing::{Level, info, instrument};
+use tokio::task::JoinSet;
+use tracing::{info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
 
+use crate::tui::app::App;
+
+mod messages;
 mod network;
 mod node;
+mod tui;
 mod utils;
 
+// Initialize tracing for application
+// Use a rolling log file that refreshes daily
 fn init_tracing() -> Result<WorkerGuard> {
     // Setup rolling logging to file
     let file_appender = tracing_appender::rolling::daily("logs", "p2p.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     let subscriber = tracing_subscriber::registry()
-        .with(
-            EnvFilter::default()
-                .add_directive(("p2p_protos=debug").parse()?)
-                .add_directive(("network=debug").parse()?)
-                .add_directive(("node=debug").parse()?),
-        )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stdout)
-                .pretty(),
-        )
+        .with(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(non_blocking)
@@ -41,27 +36,29 @@ fn init_tracing() -> Result<WorkerGuard> {
 #[tokio::main]
 #[instrument]
 async fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let _guard = init_tracing()?;
 
-    let (tx, kill_signal) = broadcast::channel::<()>(1);
-
-    let mut network = NodeNetwork::new(
-        "10.0.0.1".parse().unwrap(),
-        "10.0.0.254".parse().unwrap(),
-        kill_signal,
-    );
-
-    info!("node network built with address ranges 10.0.0.1 - 10.0.254");
+    let mut network = NodeNetwork::new(5);
+    info!("node network built with 5 nodes");
 
     let mut task_set: JoinSet<()> = JoinSet::new();
 
+    // Build the TUI application, this will hold the terminal and state of the TUI
+    let (mut app, cancellation_token, network_event_tx, network_command_rx) = App::new();
+
+    // Run the TUI task
     task_set.spawn(async move {
-        let _ = network.run().await;
+        let _ = app.run().await;
     });
 
+    // Run the node network task
+    let _cancellation_token = cancellation_token.clone();
     task_set.spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
-        let _ = tx.send(());
+        let _ = network
+            .run(5, network_event_tx, network_command_rx, _cancellation_token)
+            .await;
     });
 
     // Wait for all the tasks to finish gracefully

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use libp2p::{
     identify,
     kad::{self, store::MemoryStore},
@@ -26,5 +28,18 @@ impl From<identify::Event> for NodeNetworkEvent {
 impl From<kad::Event> for NodeNetworkEvent {
     fn from(event: kad::Event) -> Self {
         Self::Kademlia(event)
+    }
+}
+
+impl Display for NodeNetworkEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeNetworkEvent::Identify(event) => {
+                write!(f, "{:?}", event)
+            }
+            NodeNetworkEvent::Kademlia(event) => {
+                write!(f, "{:?}", event)
+            }
+        }
     }
 }

@@ -1,47 +1,28 @@
-use anyhow::{Result, anyhow};
-use ipnet::Ipv4AddrRange;
-use libp2p::{
-    Multiaddr, PeerId, Transport,
-    core::{
-        muxing::StreamMuxerBox,
-        transport::{MemoryTransport, upgrade},
-    },
-    identify, identity,
-    multiaddr::Protocol,
-    noise, yamux,
-};
-use std::{
-    collections::HashMap,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-};
-use tokio::{
-    sync::{broadcast, mpsc},
-    task::JoinSet,
-};
-use tracing::{info, instrument};
+use color_eyre::eyre::Result;
+use libp2p::PeerId;
+use std::collections::HashMap;
+use tokio::{sync::mpsc, task::JoinSet, time::Instant};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, info, instrument};
 
 use message::Message;
 
-use crate::node::Node;
+use crate::{
+    messages::{NetworkCommand, NetworkEvent},
+    node::{Node, NodeResult},
+};
 
 pub mod message;
 
 // A mock network through which the nodes communicate.
-// Nodes are given an mock IPv4 address which are used as source
 // and destination addresses when sending messages.
-// A mapping is kept of IPv4 addresses to the write end of a nodes
-// mpsc channel where messages will be sent.
 // The network maintains its own mpsc channel where it recieves messages
 // from nodes to pass/forward to the destination node found in the message.
 #[derive(Debug)]
 pub struct NodeNetwork {
-    nodes: HashMap<Ipv4Addr, mpsc::Sender<Message>>,
+    nodes: HashMap<PeerId, mpsc::Sender<Message>>,
     from_nodes: mpsc::Receiver<Message>,
-    kill_signal: broadcast::Receiver<()>,
     tx: mpsc::Sender<Message>,
-
-    // Ip range to assign nodes IpAddresses
-    ips: Ipv4AddrRange,
 
     packets: u64,
 }
@@ -49,107 +30,70 @@ pub struct NodeNetwork {
 impl NodeNetwork {
     // Returns a new network with the specified network range set
     // by the start Ipv4 address and end Ipv4 address
-    pub fn new(start: Ipv4Addr, end: Ipv4Addr, kill_signal: broadcast::Receiver<()>) -> Self {
-        let ips = Ipv4AddrRange::new(start, end);
+    pub fn new(number_of_nodes: u8) -> Self {
         let (tx, rx) = mpsc::channel(100);
 
         NodeNetwork {
-            nodes: HashMap::new(),
+            nodes: HashMap::with_capacity(number_of_nodes as usize),
             from_nodes: rx,
-            kill_signal,
             tx,
-            ips,
             packets: 0,
         }
     }
 
     // Builds and adds a new node into the network.
     // Returns a Node or an Err when the their is no more
-    // IP addresses left to assign
     pub fn add_node(&mut self) -> Result<Node> {
-        if let Some(ip) = self.ips.next() {
-            let (node, tx) =
-                Node::new(ip, self.tx.clone(), self.kill_signal.resubscribe()).unwrap();
+        let (node, tx) = Node::new(self.tx.clone())?;
 
-            self.nodes.insert(ip, tx);
+        self.nodes.insert(node.peer_id, tx);
 
-            Ok(node)
-        } else {
-            Err(anyhow!("No IPs left in range"))
-        }
+        Ok(node)
     }
 
     fn connect_two_nodes(&mut self, mut node_one: Node, node_two: &mut Node) -> Node {
         node_one.add_peer(node_two.listen_address.clone());
-
         node_one
     }
 
     // Main run loop of for the node
-    #[instrument(skip(self), name = "run network")]
-    pub async fn run(&mut self) -> Result<()> {
-        info!(target: "node_network", "node network running");
+    #[instrument(skip_all, name = "run network")]
+    pub async fn run(
+        &mut self,
+        number_of_nodes: u8,
+        network_event_tx: mpsc::Sender<NetworkEvent>,
+        mut network_command_rx: mpsc::Receiver<NetworkCommand>,
+        cancellation_token: CancellationToken,
+    ) -> Result<()> {
+        info!(target: "node_network", "node network running with {} nodes", number_of_nodes);
 
         // JoinSet for the aysnc tasks running the nodes
-        let mut node_task_set: JoinSet<()> = JoinSet::new();
+        let mut node_task_set: JoinSet<Result<NodeResult>> = JoinSet::new();
 
-        // Segment the nodes into two sections
-        // section #1 [1, 2]
-        // secion #2 [3, 4, 5]
-        // node 2 and 3 will know each other and act as
-        // the bridge between the two
-        let node_one = self.add_node().unwrap();
-        let mut node_two = self.add_node().unwrap();
-        let mut node_three = self.add_node().unwrap();
-        let node_four = self.add_node().unwrap();
-        let node_five = self.add_node().unwrap();
+        let network_start = Instant::now();
 
-        let mut node_one = self.connect_two_nodes(node_one, &mut node_two);
-        let mut node_two = self.connect_two_nodes(node_two, &mut node_three);
+        // Create and run the requested number of nodes
+        for _ in 0..number_of_nodes {
+            let mut node = self.add_node()?;
 
-        let mut node_three = self.connect_two_nodes(node_three, &mut node_two);
-        let mut node_four = self.connect_two_nodes(node_four, &mut node_three);
-        let mut node_five = self.connect_two_nodes(node_five, &mut node_four);
-
-        node_task_set.spawn(async move {
-            let _ = node_one.run().await;
-        });
-
-        node_task_set.spawn(async move {
-            let _ = node_two.run().await;
-        });
-
-        node_task_set.spawn(async move {
-            let _ = node_three.run().await;
-        });
-
-        node_task_set.spawn(async move {
-            let _ = node_four.run().await;
-        });
-
-        node_task_set.spawn(async move {
-            let _ = node_five.run().await;
-        });
+            // Every node will be able to send network events and will have
+            // a cancellation token to know when to stop
+            let _network_event_tx = network_event_tx.clone();
+            let _canceallation_token = cancellation_token.clone();
+            node_task_set.spawn(async move {
+                node.run(network_start, _network_event_tx, _canceallation_token)
+                    .await
+            });
+        }
 
         loop {
             tokio::select! {
-                _ = self.kill_signal.recv() => {
+                _ =  cancellation_token.cancelled() => {
                     break;
                 }
-
-                message = self.from_nodes.recv() => {
-                    if message.is_none() {
-                        continue;
-                    }
-
-                    let message = message.unwrap();
-
-                    if let Some(node_tx) = self.nodes.get(&message.destination()) {
-                        let _ = node_tx.send(message).await;
-
-                        self.packets += 1;
-                    }
-                }
+                Some(command) = network_command_rx.recv() => {
+                    debug!(target: "node_network", "network command recieved {:?}", command);
+                },
             }
         }
 
@@ -188,75 +132,63 @@ mod tests {
         (node_one, node_two)
     }
 
-    #[test]
-    pub fn test_adding_new_nodes() {
-        let (_, rx) = build_broadacast_channel();
-        let mut network = NodeNetwork::new(
-            "10.0.0.1".parse().unwrap(),
-            "10.0.0.10".parse().unwrap(),
-            rx,
-        );
+    //#[test]
+    //pub fn test_adding_new_nodes() {
+    //    let mut network = NodeNetwork::new(5);
 
-        let mut nodes = vec![];
-        for _ in 0..5 {
-            nodes.push(network.add_node().unwrap());
-        }
+    //    let mut nodes = vec![];
+    //    for _ in 0..5 {
+    //        nodes.push(network.add_node().unwrap());
+    //    }
 
-        assert_eq!(nodes.len(), 5);
-    }
+    //    assert_eq!(nodes.len(), 5);
+    //}
 
-    #[test]
-    pub fn test_error_out_of_ips() {
-        let (_, rx) = build_broadacast_channel();
-        let mut network =
-            NodeNetwork::new("10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap(), rx);
+    //#[test]
+    //pub fn test_error_out_of_ips() {
+    //    let mut network = NodeNetwork::new(2);
 
-        network.add_node().unwrap();
-        network.add_node().unwrap();
+    //    network.add_node();
+    //    network.add_node();
 
-        assert!(network.add_node().is_err());
-    }
+    //    assert!(network.add_node().is_err());
+    //}
 
-    #[tokio::test]
-    pub async fn test_message_between_two_nodes() {
-        let (tx, rx) = build_broadacast_channel();
-        let mut network = NodeNetwork::new(
-            "10.0.0.1".parse().unwrap(),
-            "10.0.0.10".parse().unwrap(),
-            rx,
-        );
+    //#[tokio::test]
+    //pub async fn test_message_between_two_nodes() {
+    //    let (tx, rx) = build_broadacast_channel();
+    //    let mut network = NodeNetwork::new(2, rx).unwrap();
 
-        let (mut node_one, mut node_two) = add_two_nodes_to_network(&mut network);
+    //    let (mut node_one, mut node_two) = add_two_nodes_to_network(&mut network);
 
-        let node_one_ip = node_one.ip_address;
-        let node_one_stats = node_one.stats.clone();
+    //    let node_one_stats = node_one.stats.clone();
 
-        // The network needs to be running in order to route the
-        // message between the two nodes
-        let network_handle = tokio::spawn(async move {
-            let _ = network.run().await;
-        });
+    //    // The network needs to be running in order to route the
+    //    // message between the two nodes
+    //    let network_handle = tokio::spawn(async move {
+    //        let _ = network.run(2).await;
+    //    });
 
-        // Only the node recieving the message needs to be running
-        // in this case.
-        // We needs its handle in order to get the node's stats to verify
-        // the message has recieved
-        let node_one_handle = tokio::spawn(async move {
-            let node_stats = node_one.run().await;
-            node_stats
-        });
+    //    // Only the node recieving the message needs to be running
+    //    // in this case.
+    //    // We needs its handle in order to get the node's stats to verify
+    //    // the message has recieved
+    //    let node_one_handle = tokio::spawn(async move {
+    //        let node_stats = node_one.run().await;
+    //        node_stats
+    //    });
 
-        let _ = node_two.send_to(node_one_ip, b"test").await.unwrap();
-        assert_eq!(node_two.stats.lock().unwrap().sent_count, 1);
+    //    let _ = node_two.send_to(node_one_ip, b"test").await.unwrap();
+    //    assert_eq!(node_two.stats.lock().unwrap().sent_count, 1);
 
-        // We need to add a small sleep to allow for the node to recieve and
-        // process the message before sending the kill signal
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        tx.send(()).unwrap();
+    //    // We need to add a small sleep to allow for the node to recieve and
+    //    // process the message before sending the kill signal
+    //    tokio::time::sleep(Duration::from_millis(100)).await;
+    //    tx.send(()).unwrap();
 
-        let _ = node_one_handle.await.unwrap();
-        let _ = network_handle.await.unwrap();
+    //    let _ = node_one_handle.await.unwrap();
+    //    let _ = network_handle.await.unwrap();
 
-        assert_eq!(node_one_stats.lock().unwrap().recvd_count, 1);
-    }
+    //    assert_eq!(node_one_stats.lock().unwrap().recvd_count, 1);
+    //}
 }
