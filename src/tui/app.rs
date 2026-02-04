@@ -1,22 +1,26 @@
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
+
 use color_eyre::eyre::{Context, Result};
 use libp2p::PeerId;
 use ratatui::{
     Frame,
-    buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent, KeyEventKind},
-    layout::{Constraint, Direction, Layout, Rect},
-    style::Stylize,
-    symbols::border,
-    text::Line,
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
+    layout::{Constraint, Direction, Layout},
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument};
+use tracing::{debug, field::debug, instrument};
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent},
-    tui::{Tui, TuiEvent, components::{node_box::NodeBox, node_graph::NodeGraph}},
+    node::history::MessageHistory,
+    tui::{
+        Tui, TuiEvent,
+        components::{node_box::NodeBox, node_log::NodeLog},
+    },
 };
 
 /// Determines which of the TUI components
@@ -24,15 +28,16 @@ use crate::{
 #[derive(Debug)]
 pub enum Focus {
     NodeBox,
-    NodeGraph,
+    NodeLog,
 }
 
 /// The action which is the result of handling user input
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Action {
     Quit,
     AddNode(PeerId),
     RemoveNode(PeerId),
+    DisplayLogs(PeerId),
 }
 
 #[derive(Debug)]
@@ -43,17 +48,20 @@ pub struct App {
     /// to exit
     cancellation_token: CancellationToken,
 
-    // MPSC channel for recieving events from the node network to be
-    // reflected by the TUI
+    /// MPSC channel for recieving events from the node network to be
+    /// reflected by the TUI
     network_event_rx: mpsc::Receiver<NetworkEvent>,
 
-    // MPSC channel for sending events from the TUI
-    // to the node network process
+    /// MPSC channel for sending events from the TUI
+    /// to the node network process
     command_tx: mpsc::Sender<NetworkCommand>,
+
+    /// Message histories of the nodes
+    node_messages: HashMap<PeerId, Arc<RwLock<MessageHistory>>>,
 
     /// TUI components
     node_box: NodeBox,
-    node_graph: NodeGraph,
+    node_log: NodeLog,
 
     focus: Focus,
 }
@@ -76,8 +84,9 @@ impl App {
                 network_event_rx,
                 command_tx,
                 node_box: NodeBox::new(),
-                node_graph: NodeGraph::new(),
+                node_log: NodeLog::new(),
                 focus: Focus::NodeBox,
+                node_messages: HashMap::new(),
             },
             cancellation_token,
             network_event_tx,
@@ -91,6 +100,8 @@ impl App {
         // Create and enter TUI terminal environment
         let mut tui = Tui::new()?.tick_rate(4.0).frame_rate(30.0);
         tui.enter()?;
+
+        self.node_box.focus(true);
 
         loop {
             tui.terminal.draw(|frame| self.render_frame(frame))?;
@@ -127,12 +138,36 @@ impl App {
         Ok(())
     }
 
+    pub fn switch_focus(&mut self) {
+        match self.focus {
+            Focus::NodeBox => {
+                self.node_box.focus(false);
+                self.node_log.focus(true);
+                self.focus = Focus::NodeLog;
+            }
+            Focus::NodeLog => {
+                self.node_box.focus(true);
+                self.node_log.focus(false);
+                self.focus = Focus::NodeBox;
+            }
+        }
+    }
+
     /// Process an Action and update the state of the TUI application
     /// accordingly
     fn update(&mut self, action: Action) {
+        debug!(target: "TUI App", "updating TUI using action: {:?}", action);
+
         match action {
             Action::Quit => {
                 self.quit = true;
+            }
+            Action::DisplayLogs(peer) => {
+                if let Some(message_history) = self.node_messages.get(&peer) {
+                    debug!(target: "TUI App", "successfully got message history for node: {peer}");
+
+                    self.node_log.display_logs(message_history.clone());
+                }
             }
             _ => {}
         }
@@ -155,19 +190,23 @@ impl App {
 
         match self.focus {
             Focus::NodeBox => None,
-            Focus::NodeGraph => None,
+            Focus::NodeLog => None,
         }
     }
 
     /// Process a network event from the node network and output an Action
     fn handle_network_event(&mut self, network_event: NetworkEvent) -> Option<Action> {
         match network_event {
-            NetworkEvent::NodeRunning(peer) => {
+            NetworkEvent::NodeRunning((peer, message_history)) => {
                 debug!(target: "TUI", "network event recieved: node running");
+                self.node_messages.insert(peer, message_history);
+
                 Some(Action::AddNode(peer))
             }
             NetworkEvent::NodeStopped(peer) => {
                 debug!(target: "TUI", "network event recieved: node stopped");
+
+                self.node_messages.remove_entry(&peer);
                 Some(Action::RemoveNode(peer))
             }
         }
@@ -177,14 +216,18 @@ impl App {
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
+            KeyCode::Tab => self.switch_focus(),
             _ => {}
         }
 
         match self.focus {
             Focus::NodeBox => {
-                let res = self.node_box.handle_key_event(key_event);
+                if let Some(action) = self.node_box.handle_key_event(key_event) {
+                    debug!(target: "TUI", "new action recieved from node box key event: {:?}", action);
+                    self.update(action);
+                }
             }
-            Focus::NodeGraph => {}
+            Focus::NodeLog => {}
         }
 
         Ok(())
@@ -197,7 +240,7 @@ impl App {
             .split(frame.area());
 
         self.node_box.render(frame, chunks[1]);
-        self.node_graph.render(frame, chunks[0]);
+        self.node_log.render(frame, chunks[0]);
     }
 
     pub fn exit(&mut self) {

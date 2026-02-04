@@ -65,6 +65,8 @@ impl Tui {
         let task = tokio::spawn(async {});
         let mouse = false;
 
+        set_panic_hook();
+
         Ok(Self {
             terminal,
             task,
@@ -114,6 +116,8 @@ impl Tui {
             // Send Init event for TUI application
             _event_tx.send(TuiEvent::Init).unwrap();
 
+            // Handles and sends crossterm events as well as tick and render ticks
+            // to TUI application
             loop {
                 let tick_delay = tick_interval.tick();
                 let render_delay = render_interval.tick();

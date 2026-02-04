@@ -5,7 +5,7 @@ use tokio::{sync::mpsc, task::JoinSet, time::Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
 
-use message::Message;
+use message::NodeCommand;
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent},
@@ -20,9 +20,10 @@ pub mod message;
 // from nodes to pass/forward to the destination node found in the message.
 #[derive(Debug)]
 pub struct NodeNetwork {
-    nodes: HashMap<PeerId, mpsc::Sender<Message>>,
-    from_nodes: mpsc::Receiver<Message>,
-    tx: mpsc::Sender<Message>,
+    nodes: HashMap<PeerId, mpsc::Sender<NodeCommand>>,
+
+    from_nodes: mpsc::Receiver<NodeCommand>,
+    tx: mpsc::Sender<NodeCommand>,
 
     packets: u64,
 }
@@ -45,7 +46,6 @@ impl NodeNetwork {
     // Returns a Node or an Err when the their is no more
     pub fn add_node(&mut self) -> Result<Node> {
         let (node, tx) = Node::new(self.tx.clone())?;
-
         self.nodes.insert(node.peer_id, tx);
 
         Ok(node)
@@ -72,9 +72,14 @@ impl NodeNetwork {
 
         let network_start = Instant::now();
 
+        let mut node_addresses = vec![];
+        let mut peer_ids = vec![];
         // Create and run the requested number of nodes
         for _ in 0..number_of_nodes {
+            // Store the nodes Multiaddress for connecting the nodes in the future
             let mut node = self.add_node()?;
+            node_addresses.push(node.listen_address.clone());
+            peer_ids.push(node.peer_id);
 
             // Every node will be able to send network events and will have
             // a cancellation token to know when to stop
@@ -85,6 +90,22 @@ impl NodeNetwork {
                     .await
             });
         }
+
+        // As it is the nodes none of the nodes are connected to each other
+        // we must connect each one as we see fit to create a P2P network.
+        // We can use the mpsc channel to send the connect command to the node
+
+        let node_one = self.nodes.get(&peer_ids[0]).unwrap();
+        node_one
+            .send(NodeCommand::AddPeer(node_addresses[1].clone()))
+            .await
+            .unwrap();
+
+        let node_two = self.nodes.get(&peer_ids[1]).unwrap();
+        node_two
+            .send(NodeCommand::AddPeer(node_addresses[2].clone()))
+            .await
+            .unwrap();
 
         loop {
             tokio::select! {
@@ -113,7 +134,7 @@ mod tests {
     use tokio::sync::broadcast;
 
     use crate::{
-        network::{NodeNetwork, message::Message},
+        network::{NodeNetwork, message::NodeCommand},
         node::Node,
     };
 
@@ -121,7 +142,7 @@ mod tests {
         broadcast::channel(1)
     }
 
-    fn bulid_mpsc_channel() -> (mpsc::Sender<Message>, mpsc::Receiver<Message>) {
+    fn bulid_mpsc_channel() -> (mpsc::Sender<NodeCommand>, mpsc::Receiver<NodeCommand>) {
         mpsc::channel()
     }
 

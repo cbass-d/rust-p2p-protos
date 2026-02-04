@@ -2609,6 +2609,7 @@ dependencies = [
  "crossterm",
  "directories",
  "futures",
+ "indexmap",
  "ipnet",
  "lazy_static",
  "libp2p",
