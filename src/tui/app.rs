@@ -256,7 +256,12 @@ impl App {
                     self.update(action);
                 }
             }
-            Focus::NodeLog => {}
+            Focus::NodeLog => {
+                if let Some(action) = self.node_log.handle_key_event(key_event) {
+                    debug!(target: "TUI", "new action recieved from node box key event: {:?}", action);
+                    self.update(action);
+                }
+            }
         }
 
         Ok(())
@@ -264,12 +269,12 @@ impl App {
 
     pub fn render_frame(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(frame.area());
 
-        self.node_box.render(frame, chunks[1]);
-        self.node_log.render(frame, chunks[0]);
+        self.node_box.render(frame, chunks[0]);
+        self.node_log.render(frame, chunks[1]);
     }
 
     pub fn exit(&mut self) {

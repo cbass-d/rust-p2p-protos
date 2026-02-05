@@ -33,7 +33,7 @@ use crate::{
     messages::{NetworkEvent, NodeCommand},
     node::{
         behaviour::{NodeBehaviour, NodeNetworkEvent},
-        history::{MessageHistory, SwarmEventInfo},
+        history::{MessageHistory, SwarmEventInfo, identify_event_to_string, kad_event_to_string},
         kad_handler::KadQueries,
     },
 };
@@ -281,7 +281,9 @@ impl Node {
                                 debug!(target: "node", "new identify event been added");
                                 let mut message_history = self.message_history.write().unwrap();
 
-                                message_history.add_identify_event(format!("{:?}", event), Instant::now().duration_since(start).as_secs_f32());
+                                let event_string = identify_event_to_string(&event);
+
+                                message_history.add_identify_event(event_string, Instant::now().duration_since(start).as_secs_f32());
                             }
 
                             identify_handler::handle_event(self, event)?;
@@ -292,7 +294,9 @@ impl Node {
                                 debug!(target: "node", "new kademlia event been added");
                                 let mut message_history = self.message_history.write().unwrap();
 
-                                message_history.add_kademlia_event(format!("{:?}", event), Instant::now().duration_since(start).as_secs_f32());
+                                let event_string = kad_event_to_string(&event);
+
+                                message_history.add_kademlia_event(event_string, Instant::now().duration_since(start).as_secs_f32());
                             }
 
                             kad_handler::handle_event(self, event)?;

@@ -20,6 +20,9 @@ use crate::{node::history::MessageHistory, tui::app::Action};
 pub struct NodeLog {
     active_nodes: HashSet<PeerId>,
     selected: Option<Arc<RwLock<MessageHistory>>>,
+    pub list_state: ListState,
+
+    len: usize,
     focus: bool,
 }
 
@@ -28,6 +31,8 @@ impl NodeLog {
         Self {
             active_nodes: HashSet::new(),
             selected: None,
+            list_state: ListState::default(),
+            len: 0,
             focus: false,
         }
     }
@@ -38,6 +43,40 @@ impl NodeLog {
 
     pub fn update(&mut self, action: Action) -> Option<Action> {
         None
+    }
+
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
+        match key_event.code {
+            KeyCode::Up => {
+                self.select_previous();
+            }
+            KeyCode::Down => {
+                self.select_next();
+            }
+            _ => {}
+        }
+
+        None
+    }
+
+    pub fn select_next(&mut self) {
+        self.list_state.select_next();
+    }
+
+    pub fn select_previous(&mut self) {
+        self.list_state.select_previous();
+    }
+
+    /// Moving up and down the listcan move past the bounds of the list,
+    /// we must make sure it does not
+    pub fn clamp(&mut self, idx: usize) -> usize {
+        if idx >= self.len {
+            self.len - 1
+        } else if idx < 0 {
+            0
+        } else {
+            idx
+        }
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -63,11 +102,16 @@ impl NodeLog {
 
         let message_history = selected.read().unwrap();
 
-        let all_messages = message_history.all_messages();
+        let all_messages = message_history.all_messages_formmatted();
 
-        let list = List::new(all_messages).block(block);
+        self.len = all_messages.len();
 
-        Widget::render(list, area, frame.buffer_mut());
+        let list = List::new(all_messages)
+            .block(block)
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("");
+
+        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
     pub fn display_logs(&mut self, message_history: Arc<RwLock<MessageHistory>>) {

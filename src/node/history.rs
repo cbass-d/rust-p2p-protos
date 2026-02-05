@@ -1,7 +1,13 @@
-use crate::node::behaviour::NodeNetworkEvent;
 use libp2p::{
     Multiaddr, PeerId,
-    core::{ConnectedPoint, transport::ListenerId},
+    core::{ConnectedPoint, connection, transport::ListenerId},
+    identify::Event as IdentifyEvent,
+    kad::Event as KadEvent,
+};
+use ratatui::{
+    layout::Alignment,
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
 };
 use tracing::{debug, info};
 
@@ -34,24 +40,105 @@ pub enum SwarmEventInfo {
 
 #[derive(Default, Debug)]
 pub struct MessageHistory {
-    pub identify: Vec<(String, f32)>,
-    pub kademlia: Vec<(String, f32)>,
-    pub swarm: Vec<(SwarmEventInfo, f32)>,
+    pub identify: Vec<(String, String)>,
+    pub kademlia: Vec<(String, String)>,
+    pub swarm: Vec<(SwarmEventInfo, String)>,
 }
 
 impl MessageHistory {
     pub fn add_identify_event(&mut self, event: String, since_start: f32) {
-        self.identify.push((event, since_start));
+        self.identify.push((event, format!("{:.5}", since_start)));
     }
 
     pub fn add_kademlia_event(&mut self, event: String, since_start: f32) {
-        self.kademlia.push((event, since_start));
+        self.kademlia.push((event, format!("{:.5}", since_start)));
     }
 
     pub fn identify_messages(&self) -> Vec<String> {
         self.identify
             .iter()
             .map(|(e, t)| format!("{}s : {:?}", t, e))
+            .collect()
+    }
+
+    /// Returns the Identify messages as pretty and formatted ratatui Lines
+    pub fn identify_messages_formatted(&self) -> Vec<Line<'_>> {
+        self.identify
+            .iter()
+            .map(|(m, t)| {
+                let line = Line::from(vec![
+                    Span::styled(
+                        format!("{}s", t),
+                        Style::new().add_modifier(Modifier::UNDERLINED),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        "Identify",
+                        Style::new()
+                            .bg(Color::Green)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::raw(m),
+                ]);
+
+                line
+            })
+            .collect()
+    }
+
+    /// Returns the Kademlia messages as pretty and formatted ratatui Lines
+    pub fn kad_messages_formatted(&self) -> Vec<Line<'_>> {
+        self.kademlia
+            .iter()
+            .map(|(m, t)| {
+                let line = Line::from(vec![
+                    Span::styled(
+                        format!("{}s", t),
+                        Style::new().add_modifier(Modifier::UNDERLINED),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        "Kademlia",
+                        Style::new()
+                            .bg(Color::Blue)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::raw(m),
+                ]);
+
+                line
+            })
+            .collect()
+    }
+
+    /// Returns the Swarm messages as pretty and formatted ratatui Lines
+    pub fn swarm_messages_formatted(&self) -> Vec<Line<'_>> {
+        self.swarm
+            .iter()
+            .map(|(m, t)| {
+                let line = Line::from(vec![
+                    Span::styled(
+                        format!("{}s", t),
+                        Style::new().add_modifier(Modifier::UNDERLINED),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        "SWARM",
+                        Style::new()
+                            .bg(Color::Yellow)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::raw(format_swarm_event(m)),
+                ]);
+
+                line
+            })
             .collect()
     }
 
@@ -67,6 +154,15 @@ impl MessageHistory {
             .iter()
             .map(|(e, t)| format!("{}s : {:?}", t, e))
             .collect()
+    }
+
+    pub fn all_messages_formmatted(&self) -> Vec<Line<'_>> {
+        let mut messages = vec![];
+        messages.append(&mut self.identify_messages_formatted());
+        messages.append(&mut self.kad_messages_formatted());
+        messages.append(&mut self.swarm_messages_formatted());
+
+        messages
     }
 
     pub fn all_messages(&self) -> Vec<String> {
@@ -103,6 +199,135 @@ impl MessageHistory {
     }
 
     pub fn add_swarm_event(&mut self, event: SwarmEventInfo, since_start: f32) {
-        self.swarm.push((event, since_start));
+        self.swarm.push((event, format!("{:.5}", since_start)));
+    }
+}
+
+pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
+    match event {
+        IdentifyEvent::Sent {
+            connection_id,
+            peer_id,
+        } => {
+            format!(
+                "SENT Identification information to {} ({})",
+                peer_id, connection_id
+            )
+        }
+        IdentifyEvent::Received {
+            connection_id,
+            peer_id,
+            info,
+        } => {
+            format!(
+                "RECIEVED Identification information from {} ({})",
+                peer_id, connection_id
+            )
+        }
+        IdentifyEvent::Pushed {
+            connection_id,
+            peer_id,
+            info,
+        } => {
+            format!(
+                "PUSHED Identification information to {} ({})",
+                peer_id, connection_id
+            )
+        }
+        IdentifyEvent::Error {
+            connection_id,
+            peer_id,
+            error,
+        } => {
+            format!(
+                "ERROR Trying to identify {}: {:?} ({})",
+                peer_id, error, connection_id
+            )
+        }
+    }
+}
+
+pub fn kad_event_to_string(event: &KadEvent) -> String {
+    match event {
+        KadEvent::ModeChanged { new_mode } => {
+            format!("MODE Mode changed to {}", new_mode)
+        }
+        KadEvent::RoutablePeer { peer, address } => {
+            format!("ROUTABLE PEER Peer {} at {} now routable", peer, address)
+        }
+        KadEvent::InboundRequest { request } => {
+            format!("INBOUND REQUEST {:?}", request)
+        }
+        KadEvent::RoutingUpdated {
+            peer,
+            is_new_peer,
+            addresses,
+            bucket_range,
+            old_peer,
+        } => {
+            if *is_new_peer {
+                format!("ROUTING UPDATED Routing for new peer {} updated", peer)
+            } else {
+                format!("ROUTING UPDATED Routing for peer {} updated", peer)
+            }
+        }
+        KadEvent::UnroutablePeer { peer } => {
+            format!("UNROUTABLE Peer {} is unroutable", peer)
+        }
+        KadEvent::PendingRoutablePeer { peer, address } => {
+            format!(
+                "PENIDNG ROUTE Connection to peer {} established, pednding addition to table",
+                peer
+            )
+        }
+        KadEvent::OutboundQueryProgressed {
+            id,
+            result,
+            stats,
+            step,
+        } => {
+            format!(
+                "OUTBOUD QUERY PROGRESSES Outbound query {} has progressed",
+                id
+            )
+        }
+    }
+}
+
+pub fn format_swarm_event(event: &SwarmEventInfo) -> String {
+    match event {
+        SwarmEventInfo::Dialing { peer_id } => {
+            format!("DIALING Now dialing peer {}", peer_id.unwrap())
+        }
+        SwarmEventInfo::NewListenAddr {
+            listener_id,
+            address,
+        } => {
+            format!(
+                "NEW LISTENER New listener {} with address {}",
+                listener_id, address
+            )
+        }
+        SwarmEventInfo::ListenerClosed {
+            listener_id,
+            addresses,
+        } => {
+            format!(
+                "LISTENER CLOSED The listener {} at addresses {:?} closed",
+                listener_id, addresses
+            )
+        }
+        SwarmEventInfo::ConnectionClosed { peer_id, endpoint } => {
+            format!("CONNECTION CLOSED The connection with {} closed", peer_id)
+        }
+        SwarmEventInfo::IncomingConnection { peer_id, endpoint } => {
+            format!("INCOMING CONNECTION New connection from {}", peer_id)
+        }
+        SwarmEventInfo::ConnectionEstablished { peer_id, endpoint } => {
+            format!(
+                "CONNECTION ESTABLISHED Connection established with {}",
+                peer_id
+            )
+        }
     }
 }
