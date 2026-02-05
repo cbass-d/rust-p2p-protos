@@ -2,7 +2,7 @@ pub mod app;
 mod components;
 
 use std::{
-    io::{self, Stdout, stdout},
+    io::{Stdout, stdout},
     time::Duration,
 };
 
@@ -12,12 +12,9 @@ use futures::{FutureExt, StreamExt};
 use ratatui::{
     Terminal,
     crossterm::{
-        self, ExecutableCommand, cursor,
-        event::{
-            DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyEvent, MouseEvent,
-        },
-        execute,
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, enable_raw_mode},
+        self, cursor,
+        event::{Event as CrosstermEvent, KeyEvent},
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen},
     },
     prelude::CrosstermBackend,
     restore,
@@ -27,9 +24,10 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
-// Events originating from the user interacting with
-// the TUI
+/// Events originating from the user interacting with the TUI
+/// as well as tick and render events
 pub enum TuiEvent {
     Init,
     Quit,
@@ -38,21 +36,21 @@ pub enum TuiEvent {
     Tick,
     Render,
     Key(KeyEvent),
-    Mouse(MouseEvent),
 }
 
+/// The TUI structure that holds the state of the terminal enviornment as well
+/// as the handling of reading of events from the CrosstermBackend
 pub struct Tui {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
     pub task: JoinHandle<()>,
     pub cancellation_token: CancellationToken,
 
-    // This mpsc channel is exclusive for TUI/Crossterm events
+    /// This mpsc channel is exclusive for TUI/Crossterm events
     pub tui_event_rx: UnboundedReceiver<TuiEvent>,
     pub tui_event_tx: UnboundedSender<TuiEvent>,
 
     pub frame_rate: f64,
     pub tick_rate: f64,
-    pub mouse: bool,
 }
 
 impl Tui {
@@ -63,7 +61,6 @@ impl Tui {
         let (tui_event_tx, tui_event_rx) = mpsc::unbounded_channel();
         let cancellation_token = CancellationToken::new();
         let task = tokio::spawn(async {});
-        let mouse = false;
 
         set_panic_hook();
 
@@ -75,7 +72,6 @@ impl Tui {
             tui_event_tx,
             frame_rate,
             tick_rate,
-            mouse,
         })
     }
 
@@ -89,11 +85,6 @@ impl Tui {
         self
     }
 
-    pub fn mouse(mut self, mouse: bool) -> Self {
-        self.mouse = mouse;
-        self
-    }
-
     pub fn start(&mut self) {
         let tick_delay = Duration::from_secs_f64(1.0 / self.tick_rate);
         let render_delay = Duration::from_secs_f64(1.0 / self.frame_rate);
@@ -103,6 +94,7 @@ impl Tui {
         self.cancel();
         self.cancellation_token = CancellationToken::new();
 
+        // Copies to be passed to the tokio task block
         let _cancellation_token = self.cancellation_token.clone();
         let _event_tx = self.tui_event_tx.clone();
 
@@ -114,6 +106,8 @@ impl Tui {
             let mut render_interval = tokio::time::interval(render_delay);
 
             // Send Init event for TUI application
+            // If this fails there is no reason for the application to continue
+            // so we unwrap it
             _event_tx.send(TuiEvent::Init).unwrap();
 
             // Handles and sends crossterm events as well as tick and render ticks
@@ -125,6 +119,7 @@ impl Tui {
 
                 tokio::select! {
                     _ = _cancellation_token.cancelled() => {
+                        debug!(target: "TUI Event reader", "received signal of cancellation token");
                         break;
                     }
 
@@ -136,9 +131,6 @@ impl Tui {
                                         if key.kind == KeyEventKind::Press {
                                             _event_tx.send(TuiEvent::Key(key)).unwrap();
                                         }
-                                    }
-                                    CrosstermEvent::Mouse(mouse) => {
-                                        _event_tx.send(TuiEvent::Mouse(mouse)).unwrap();
                                     }
                                     _ => {},
                                 }
@@ -187,9 +179,6 @@ impl Tui {
     pub fn enter(&mut self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
-        if self.mouse {
-            crossterm::execute!(stdout(), EnableMouseCapture)?;
-        }
         self.start();
         Ok(())
     }
@@ -215,9 +204,6 @@ impl Tui {
 
         // Clean up the terminal environment
         if crossterm::terminal::is_raw_mode_enabled()? {
-            if self.mouse {
-                crossterm::execute!(stdout(), DisableMouseCapture)?;
-            }
             crossterm::execute!(stdout(), LeaveAlternateScreen, cursor::Show)?;
             crossterm::terminal::disable_raw_mode()?;
         }

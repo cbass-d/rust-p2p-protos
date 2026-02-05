@@ -30,8 +30,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    messages::NetworkEvent,
-    network::message::NodeCommand,
+    messages::{NetworkEvent, NodeCommand},
     node::{
         behaviour::{NodeBehaviour, NodeNetworkEvent},
         history::{MessageHistory, SwarmEventInfo},

@@ -36,6 +36,10 @@ impl NodeLog {
         self.focus = focus;
     }
 
+    pub fn update(&mut self, action: Action) -> Option<Action> {
+        None
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let block = if self.focus {
             Block::new()

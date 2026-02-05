@@ -5,14 +5,10 @@ use tokio::{sync::mpsc, task::JoinSet, time::Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
 
-use message::NodeCommand;
-
 use crate::{
-    messages::{NetworkCommand, NetworkEvent},
+    messages::{NetworkCommand, NetworkEvent, NodeCommand},
     node::{Node, NodeResult},
 };
-
-pub mod message;
 
 // A mock network through which the nodes communicate.
 // and destination addresses when sending messages.
@@ -33,6 +29,8 @@ impl NodeNetwork {
     // by the start Ipv4 address and end Ipv4 address
     pub fn new(number_of_nodes: u8) -> Self {
         let (tx, rx) = mpsc::channel(100);
+
+        debug!(target: "node_network", "node network built with {}", number_of_nodes);
 
         NodeNetwork {
             nodes: HashMap::with_capacity(number_of_nodes as usize),
@@ -129,30 +127,6 @@ impl NodeNetwork {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::mpsc, time::Duration};
-
-    use tokio::sync::broadcast;
-
-    use crate::{
-        network::{NodeNetwork, message::NodeCommand},
-        node::Node,
-    };
-
-    fn build_broadacast_channel() -> (broadcast::Sender<()>, broadcast::Receiver<()>) {
-        broadcast::channel(1)
-    }
-
-    fn bulid_mpsc_channel() -> (mpsc::Sender<NodeCommand>, mpsc::Receiver<NodeCommand>) {
-        mpsc::channel()
-    }
-
-    fn add_two_nodes_to_network(network: &mut NodeNetwork) -> (Node, Node) {
-        let node_one = network.add_node().unwrap();
-        let node_two = network.add_node().unwrap();
-
-        (node_one, node_two)
-    }
-
     //#[test]
     //pub fn test_adding_new_nodes() {
     //    let mut network = NodeNetwork::new(5);

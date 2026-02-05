@@ -1,3 +1,11 @@
+mod cli;
+mod messages;
+mod network;
+mod node;
+mod tui;
+mod utils;
+
+use clap::Parser;
 use color_eyre::eyre::Result;
 use network::NodeNetwork;
 use tokio::task::JoinSet;
@@ -5,13 +13,7 @@ use tracing::{info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
 
-use crate::tui::app::App;
-
-mod messages;
-mod network;
-mod node;
-mod tui;
-mod utils;
+use crate::{cli::CliArgs, tui::app::App};
 
 // Initialize tracing for application
 // Use a rolling log file that refreshes daily
@@ -40,12 +42,18 @@ async fn main() -> Result<()> {
 
     let _guard = init_tracing()?;
 
-    let mut network = NodeNetwork::new(5);
-    info!("node network built with 5 nodes");
+    let args = CliArgs::parse();
+    let number_of_nodes = args.nodes;
 
+    let mut network = NodeNetwork::new(number_of_nodes);
+
+    // The task set will hold the TUI taks and the node network tasks
+    // Using task set makes it easier to manage the waiting on tasks to finish
     let mut task_set: JoinSet<()> = JoinSet::new();
 
     // Build the TUI application, this will hold the terminal and state of the TUI
+    // - network_event_tx: used to send events from the node network to the TUI module
+    // - network_command_rx: used for the node network receive commands from the TUI module
     let (mut app, cancellation_token, network_event_tx, network_command_rx) = App::new();
 
     // Run the TUI task
@@ -57,7 +65,12 @@ async fn main() -> Result<()> {
     let _cancellation_token = cancellation_token.clone();
     task_set.spawn(async move {
         let _ = network
-            .run(5, network_event_tx, network_command_rx, _cancellation_token)
+            .run(
+                number_of_nodes,
+                network_event_tx,
+                network_command_rx,
+                _cancellation_token,
+            )
             .await;
     });
 

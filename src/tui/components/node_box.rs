@@ -1,4 +1,3 @@
-use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
@@ -11,11 +10,22 @@ use ratatui::{
 
 use crate::tui::app::Action;
 
+/// A display for the currently active nodes
+/// Consists of a list that can be iterated through by
+/// the user
 #[derive(Debug, Clone)]
 pub struct NodeBox {
+    /// A IndexSet (a hashset that be accessed using []) of the actively
+    /// running nodes that is used to build the list
     active_nodes: IndexSet<PeerId>,
+
+    /// The length of the current list of active nodes
     len: usize,
+
+    /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
+
+    /// If the component is currenlty in focus in the TUI
     focus: bool,
 }
 
@@ -62,7 +72,7 @@ impl NodeBox {
                 self.select_previous();
 
                 // Get the index of the newly selected node
-                let node_idx = self.list_state.selected().unwrap_or(0);
+                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
                 Some(Action::DisplayLogs(self.active_nodes[node_idx]))
             }
             KeyCode::Down => {
@@ -84,23 +94,40 @@ impl NodeBox {
         self.list_state.select_previous();
     }
 
-    /// select_next() can move past the last item in the list so
+    /// Moving up and down the listcan move past the bounds of the list,
     /// we must make sure it does not
     pub fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len { self.len - 1 } else { idx }
+        if idx >= self.len {
+            self.len - 1
+        } else if idx < 0 {
+            0
+        } else {
+            idx
+        }
     }
 
-    pub fn update(&mut self, action: Action) {
+    pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::AddNode(peer) => {
                 self.active_nodes.insert(peer);
                 self.len += 1;
+
+                // Auto select the first node we add
+                if self.list_state.selected().is_none() {
+                    self.list_state = self.list_state.with_selected(Some(0));
+
+                    Some(Action::DisplayLogs(self.active_nodes[0]))
+                } else {
+                    None
+                }
             }
             Action::RemoveNode(peer) => {
                 self.active_nodes.swap_remove(&peer);
                 self.len -= 1;
+
+                None
             }
-            _ => {}
+            _ => None,
         }
     }
 }

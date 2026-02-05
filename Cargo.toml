@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-clap = { version = "4.5.54", features = ["cargo"] }
+clap = { version = "4.5.54", features = ["cargo", "derive"] }
 color-eyre = "0.6.5"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 directories = "6.0.0"

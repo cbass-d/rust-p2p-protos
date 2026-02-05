@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, RwLock},
 };
 
@@ -63,6 +63,10 @@ pub struct App {
     node_box: NodeBox,
     node_log: NodeLog,
 
+    /// Queue of Actions to be performed
+    actions: VecDeque<Action>,
+
+    /// Determines which of the components is in focus
     focus: Focus,
 }
 
@@ -76,6 +80,7 @@ impl App {
         // Create the MPSC channels for passing of messages betweeen the node network and the TUI
         let (network_event_tx, network_event_rx) = mpsc::channel::<NetworkEvent>(10);
         let (command_tx, command_rx) = mpsc::channel::<NetworkCommand>(10);
+
         let cancellation_token = CancellationToken::new();
         (
             Self {
@@ -85,6 +90,7 @@ impl App {
                 command_tx,
                 node_box: NodeBox::new(),
                 node_log: NodeLog::new(),
+                actions: VecDeque::new(),
                 focus: Focus::NodeBox,
                 node_messages: HashMap::new(),
             },
@@ -101,29 +107,36 @@ impl App {
         let mut tui = Tui::new()?.tick_rate(4.0).frame_rate(30.0);
         tui.enter()?;
 
+        // Set the default focus to the NodeBox component
         self.node_box.focus(true);
 
         loop {
             tui.terminal.draw(|frame| self.render_frame(frame))?;
 
-            // Select network event from the node network or TUI event from the
+            // Select the next network event from the node network or TUI event from the
             // user/interface
             tokio::select! {
                 Some(network_event) = self.network_event_rx.recv() => {
 
                     // Process the network event and get the action to preform
                     let maybe_action = self.handle_network_event(network_event);
-                    debug!(target: "TUI", "action being done: {:?}", maybe_action);
 
-                    // Perform the action
+                    debug!(target: "TUI", "Network event action being done: {:?}", maybe_action);
+
                     if let Some(action) = maybe_action {
                         self.update(action);
+                        self.process_actions();
                     }
+
                 }
                 Some(tui_event) = tui.next() => {
                     let maybe_action = self.handle_tui_event(tui_event);
+
+                    debug!(target: "TUI", "TUI action being done: {:?}", maybe_action);
+
                     if let Some(action) = maybe_action {
                         self.update(action);
+                        self.process_actions();
                     }
                 },
             }
@@ -172,7 +185,22 @@ impl App {
             _ => {}
         }
 
-        self.node_box.update(action);
+        // Pass the action through the different components adding the
+        // returned action if needed
+        if let Some(action) = self.node_box.update(action) {
+            self.actions.push_back(action);
+        }
+
+        if let Some(action) = self.node_log.update(action) {
+            self.actions.push_back(action);
+        }
+    }
+
+    /// Process the current actions in the queue
+    fn process_actions(&mut self) {
+        while let Some(action) = self.actions.pop_front() {
+            self.update(action);
+        }
     }
 
     /// Process a TUI event and output an Action
@@ -209,6 +237,7 @@ impl App {
                 self.node_messages.remove_entry(&peer);
                 Some(Action::RemoveNode(peer))
             }
+            _ => None,
         }
     }
 
