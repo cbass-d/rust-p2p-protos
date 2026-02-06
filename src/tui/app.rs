@@ -1,6 +1,7 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use color_eyre::eyre::{Context, Result};
@@ -32,10 +33,14 @@ pub enum Focus {
 }
 
 /// The action which is the result of handling user input
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Action {
     Quit,
-    AddNode(PeerId),
+    AddNode {
+        peer_id: PeerId,
+        node_connections: Arc<RwLock<HashSet<PeerId>>>,
+    },
+    AddNodeToGraph((PeerId, Arc<RwLock<HashSet<PeerId>>>)),
     RemoveNode(PeerId),
     DisplayLogs(PeerId),
 }
@@ -58,6 +63,9 @@ pub struct App {
 
     /// Message histories and stats of the nodes
     node_logs: HashMap<PeerId, Arc<RwLock<(MessageHistory, NodeStats)>>>,
+
+    /// HashMap containg the connections between the nodes
+    node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
     /// TUI components
     node_box: NodeBox,
@@ -95,6 +103,7 @@ impl App {
                 actions: VecDeque::new(),
                 focus: Focus::NodeList,
                 node_logs: HashMap::new(),
+                node_connections: HashMap::new(),
             },
             cancellation_token,
             network_event_tx,
@@ -107,6 +116,7 @@ impl App {
     pub async fn run(&mut self) -> Result<()> {
         // Create and enter TUI terminal environment
         let mut tui = Tui::new()?.tick_rate(4.0).frame_rate(30.0);
+
         tui.enter()?;
 
         // Set the default focus to the NodeBox component
@@ -148,6 +158,9 @@ impl App {
             }
         }
 
+        self.cancellation_token.cancel();
+
+        debug!(target: "TUI", "TUI CANCELLED TOKEN");
         tui.exit()?;
 
         Ok(())
@@ -189,11 +202,11 @@ impl App {
 
         // Pass the action through the different components adding the
         // returned action if needed
-        if let Some(action) = self.node_box.update(action) {
+        if let Some(action) = self.node_box.update(action.clone()) {
             self.actions.push_back(action);
         }
 
-        if let Some(action) = self.node_list.update(action) {
+        if let Some(action) = self.node_list.update(action.clone()) {
             self.actions.push_back(action);
         }
 
@@ -216,10 +229,8 @@ impl App {
                 let _ = self
                     .handle_key_event(key_event)
                     .wrap_err_with(|| format!("handling key event failed: {key_event:#?}"));
-
-                Some(Action::Quit)
             }
-            _ => None,
+            _ => {}
         };
 
         match self.focus {
@@ -231,11 +242,14 @@ impl App {
     /// Process a network event from the node network and output an Action
     fn handle_network_event(&mut self, network_event: NetworkEvent) -> Option<Action> {
         match network_event {
-            NetworkEvent::NodeRunning((peer, node_logs)) => {
+            NetworkEvent::NodeRunning((peer, node_logs, node_connections)) => {
                 debug!(target: "TUI", "network event recieved: node running");
                 self.node_logs.insert(peer, node_logs);
 
-                Some(Action::AddNode(peer))
+                Some(Action::AddNode {
+                    peer_id: peer,
+                    node_connections,
+                })
             }
             NetworkEvent::NodeStopped(peer) => {
                 debug!(target: "TUI", "network event recieved: node stopped");
@@ -296,6 +310,5 @@ impl App {
 
     pub fn exit(&mut self) {
         self.quit = true;
-        self.cancellation_token.cancel();
     }
 }

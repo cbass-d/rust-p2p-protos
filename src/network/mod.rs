@@ -83,10 +83,13 @@ impl NodeNetwork {
             // a cancellation token to know when to stop
             let _network_event_tx = network_event_tx.clone();
             let _canceallation_token = cancellation_token.clone();
+
             node_task_set.spawn(async move {
                 node.run(network_start, _network_event_tx, _canceallation_token)
                     .await
             });
+
+            debug!(target: "node_network", "new node task spawned");
         }
 
         // As it is the nodes none of the nodes are connected to each other
@@ -108,6 +111,7 @@ impl NodeNetwork {
         loop {
             tokio::select! {
                 _ =  cancellation_token.cancelled() => {
+                    debug!(target: "node_network", "-------------> cancellation token signal received");
                     break;
                 }
                 Some(command) = network_command_rx.recv() => {
@@ -120,6 +124,8 @@ impl NodeNetwork {
 
         // Wait for all the nodes to finish
         let _ = node_task_set.join_all().await;
+
+        debug!(target: "node_network", "node tasks ended");
 
         Ok(())
     }

@@ -1,8 +1,11 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, RwLock},
+};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
-use libp2p::PeerId;
+use libp2p::{PeerId, core::connection};
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
@@ -13,8 +16,12 @@ use ratatui::{
         canvas::{Canvas, Circle, Line, Map, MapResolution, Rectangle},
     },
 };
+use tracing::debug;
 
 use crate::tui::app::Action;
+
+/// Radius of the circles representing the nodes
+const RADIUS: f64 = 12.0;
 
 #[derive(Debug, Clone)]
 pub struct NodeCoords {
@@ -40,6 +47,9 @@ pub struct NodeBox {
     /// If the component is currenlty in focus in the TUI
     focus: bool,
 
+    /// Hashmap representing the connections between the nodes
+    node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
+
     x_bound: f64,
     y_bound: f64,
 
@@ -57,6 +67,7 @@ impl NodeBox {
             y_bound: 90.0,
             node_coords: HashMap::default(),
             node_shapes: HashMap::default(),
+            node_connections: HashMap::default(),
             focus: false,
         }
     }
@@ -77,6 +88,14 @@ impl NodeBox {
         };
 
         let nodes = &self.node_shapes;
+        let connections = &self.node_connections;
+
+        let connection_snapshot: HashMap<PeerId, HashSet<PeerId>> = connections
+            .iter()
+            .filter_map(|(id, lock)| lock.try_read().ok().map(|peers| (*id, peers.clone())))
+            .collect();
+
+        debug!(target: "node_box", "{} total nodes being drawn", nodes.len());
 
         let canvas = Canvas::default()
             .marker(Marker::Sextant)
@@ -84,22 +103,30 @@ impl NodeBox {
             .x_bounds([-self.x_bound, self.x_bound])
             .y_bounds([-self.y_bound, self.y_bound])
             .paint(|ctx| {
+                // Draw connections first (behind)
+                nodes.iter().for_each(|n| {
+                    if let Some(peers) = connection_snapshot.get(n.0) {
+                        for peer in peers.iter() {
+                            if let Some(other) = nodes.get(peer) {
+                                ctx.draw(&Line {
+                                    x1: n.1.x,
+                                    y1: n.1.y,
+                                    x2: other.x,
+                                    y2: other.y,
+                                    color: Color::White,
+                                });
+                            }
+                        }
+                    }
+                });
+
+                ctx.layer();
+
+                // Draw nodes on top
                 nodes.iter().for_each(|n| ctx.draw(n.1));
             });
 
         canvas.render(area, frame.buffer_mut());
-
-        //let list = List::new(
-        //    self.active_nodes
-        //        .iter()
-        //        .map(|p| p.to_string())
-        //        .collect::<Vec<String>>(),
-        //)
-        //.highlight_style(Style::new().reversed())
-        //.highlight_symbol(">")
-        //.block(block);
-
-        //frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
     fn update_selection_in_graph(&mut self, peer: PeerId) {
@@ -133,7 +160,7 @@ impl NodeBox {
                 return Circle {
                     x,
                     y,
-                    radius: 12.0,
+                    radius: RADIUS,
                     color: Color::White,
                 };
             }
@@ -184,12 +211,18 @@ impl NodeBox {
 
     pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
-            Action::AddNode(peer) => {
-                self.active_nodes.insert(peer);
+            Action::AddNode {
+                peer_id,
+                node_connections,
+            } => {
+                debug!(target: "node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
+
+                self.active_nodes.insert(peer_id);
                 self.len += 1;
 
-                let node = self.generate_node_on_canvas(peer);
-                self.node_shapes.insert(peer, node);
+                let node = self.generate_node_on_canvas(peer_id);
+                self.node_shapes.insert(peer_id, node);
+                self.node_connections.insert(peer_id, node_connections);
 
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {

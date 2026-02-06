@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
@@ -7,11 +5,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::{Color, Style},
-    symbols::Marker,
-    widgets::{
-        Block, Borders, List, ListState, Widget,
-        canvas::{Canvas, Circle, Line, Map, MapResolution, Rectangle},
-    },
+    widgets::{Block, Borders, List, ListState},
 };
 
 use crate::tui::app::Action;
@@ -115,8 +109,8 @@ impl NodeList {
 
     pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
-            Action::AddNode(peer) => {
-                self.active_nodes.insert(peer);
+            Action::AddNode { peer_id, .. } => {
+                self.active_nodes.insert(peer_id);
                 self.len += 1;
 
                 // Auto select the first node we add

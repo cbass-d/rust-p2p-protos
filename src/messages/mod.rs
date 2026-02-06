@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::sync::{Arc, RwLock};
 
@@ -9,7 +10,13 @@ use crate::node::history::MessageHistory;
 
 #[derive(Debug)]
 pub enum NetworkEvent {
-    NodeRunning((PeerId, Arc<RwLock<(MessageHistory, NodeStats)>>)),
+    NodeRunning(
+        (
+            PeerId,
+            Arc<RwLock<(MessageHistory, NodeStats)>>,
+            Arc<RwLock<HashSet<PeerId>>>,
+        ),
+    ),
     NodeStopped(PeerId),
     NodesConnected((PeerId, PeerId)),
 }

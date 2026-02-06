@@ -69,7 +69,7 @@ pub struct Node {
     pub peer_id: PeerId,
     to_network: mpsc::Sender<NodeCommand>,
     from_network: mpsc::Receiver<NodeCommand>,
-    current_peers: HashSet<PeerId>,
+    current_peers: Arc<RwLock<HashSet<PeerId>>>,
     known_peers: Vec<Multiaddr>,
 
     logs: Arc<RwLock<(MessageHistory, NodeStats)>>,
@@ -131,7 +131,7 @@ impl Node {
             peer_id,
             to_network,
             from_network: rx,
-            current_peers: HashSet::new(),
+            current_peers: Arc::new(RwLock::new(HashSet::new())),
             known_peers: vec![],
             logs: logs.clone(),
             kad_queries: KadQueries::default(),
@@ -174,7 +174,11 @@ impl Node {
         );
 
         let _ = network_event_tx
-            .send(NetworkEvent::NodeRunning((self.peer_id, self.logs.clone())))
+            .send(NetworkEvent::NodeRunning((
+                self.peer_id,
+                self.logs.clone(),
+                self.current_peers.clone(),
+            )))
             .await;
 
         self.swarm.listen_on(self.listen_address.clone())?;
@@ -196,16 +200,11 @@ impl Node {
 
         if !self.known_peers.is_empty() {}
 
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
-
         loop {
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
+                    debug!(target: "node", "cancellation token signal received");
                     break;
-                },
-                _ = interval.tick() => {
-                        let messages = &self.logs.read().unwrap().0;
-                        debug!(target: "node", "current node messages: {:?}", messages);
                 },
                 message = self.from_network.recv() => {
                     if message.is_none() {
@@ -239,6 +238,8 @@ impl Node {
                                 ConnectedPoint::Listener { send_back_addr, ..} => send_back_addr,
                             };
                             self.swarm.behaviour_mut().kad.add_address(&peer_id, peer_addr);
+
+                            self.current_peers.write().unwrap().insert(peer_id);
 
                             self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
 
