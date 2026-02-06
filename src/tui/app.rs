@@ -19,7 +19,7 @@ use crate::{
     node::{NodeStats, history::MessageHistory},
     tui::{
         Tui, TuiEvent,
-        components::{node_box::NodeBox, node_log::NodeLog},
+        components::{node_box::NodeBox, node_list::NodeList, node_log::NodeLog},
     },
 };
 
@@ -27,8 +27,8 @@ use crate::{
 /// is in focus and will take priority in handling user input
 #[derive(Debug)]
 pub enum Focus {
-    NodeBox,
     NodeLog,
+    NodeList,
 }
 
 /// The action which is the result of handling user input
@@ -62,6 +62,7 @@ pub struct App {
     /// TUI components
     node_box: NodeBox,
     node_log: NodeLog,
+    node_list: NodeList,
 
     /// Queue of Actions to be performed
     actions: VecDeque<Action>,
@@ -90,8 +91,9 @@ impl App {
                 command_tx,
                 node_box: NodeBox::new(),
                 node_log: NodeLog::new(),
+                node_list: NodeList::new(),
                 actions: VecDeque::new(),
-                focus: Focus::NodeBox,
+                focus: Focus::NodeList,
                 node_logs: HashMap::new(),
             },
             cancellation_token,
@@ -108,7 +110,7 @@ impl App {
         tui.enter()?;
 
         // Set the default focus to the NodeBox component
-        self.node_box.focus(true);
+        self.node_list.focus(true);
 
         loop {
             tui.terminal.draw(|frame| self.render_frame(frame))?;
@@ -153,15 +155,15 @@ impl App {
 
     pub fn switch_focus(&mut self) {
         match self.focus {
-            Focus::NodeBox => {
-                self.node_box.focus(false);
+            Focus::NodeList => {
+                self.node_list.focus(false);
                 self.node_log.focus(true);
                 self.focus = Focus::NodeLog;
             }
             Focus::NodeLog => {
-                self.node_box.focus(true);
+                self.node_list.focus(true);
                 self.node_log.focus(false);
-                self.focus = Focus::NodeBox;
+                self.focus = Focus::NodeList;
             }
         }
     }
@@ -191,6 +193,10 @@ impl App {
             self.actions.push_back(action);
         }
 
+        if let Some(action) = self.node_list.update(action) {
+            self.actions.push_back(action);
+        }
+
         if let Some(action) = self.node_log.update(action) {
             self.actions.push_back(action);
         }
@@ -217,7 +223,7 @@ impl App {
         };
 
         match self.focus {
-            Focus::NodeBox => None,
+            Focus::NodeList => None,
             Focus::NodeLog => None,
         }
     }
@@ -250,8 +256,13 @@ impl App {
         }
 
         match self.focus {
-            Focus::NodeBox => {
+            Focus::NodeList => {
                 if let Some(action) = self.node_box.handle_key_event(key_event) {
+                    debug!(target: "TUI", "new action recieved from node box key event: {:?}", action);
+                    self.update(action);
+                }
+
+                if let Some(action) = self.node_list.handle_key_event(key_event) {
                     debug!(target: "TUI", "new action recieved from node box key event: {:?}", action);
                     self.update(action);
                 }
@@ -268,13 +279,19 @@ impl App {
     }
 
     pub fn render_frame(&mut self, frame: &mut Frame) {
-        let chunks = Layout::default()
+        let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(frame.area());
 
-        self.node_box.render(frame, chunks[0]);
-        self.node_log.render(frame, chunks[1]);
+        let top_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(main_chunks[0]);
+
+        self.node_box.render(frame, top_chunks[0]);
+        self.node_list.render(frame, top_chunks[1]);
+        self.node_log.render(frame, main_chunks[1]);
     }
 
     pub fn exit(&mut self) {

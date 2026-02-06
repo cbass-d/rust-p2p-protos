@@ -2,6 +2,7 @@ mod cli;
 mod messages;
 mod network;
 mod node;
+mod tests;
 mod tui;
 mod utils;
 
