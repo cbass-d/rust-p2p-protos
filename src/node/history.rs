@@ -11,7 +11,7 @@ use ratatui::{
 };
 use tracing::{debug, info};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SwarmEventInfo {
     ConnectionEstablished {
         peer_id: PeerId,
@@ -38,7 +38,7 @@ pub enum SwarmEventInfo {
     },
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct MessageHistory {
     pub identify: Vec<(String, String)>,
     pub kademlia: Vec<(String, String)>,

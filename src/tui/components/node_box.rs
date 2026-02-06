@@ -3,7 +3,7 @@ use indexmap::IndexSet;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, List, ListState},
 };
@@ -47,6 +47,7 @@ impl NodeBox {
         let block = if self.focus {
             Block::new()
                 .title("Node Graph")
+                .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_style(Color::LightRed)
         } else {

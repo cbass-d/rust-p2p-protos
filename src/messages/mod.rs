@@ -4,11 +4,12 @@ use std::sync::{Arc, RwLock};
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
+use crate::node::NodeStats;
 use crate::node::history::MessageHistory;
 
 #[derive(Debug)]
 pub enum NetworkEvent {
-    NodeRunning((PeerId, Arc<RwLock<MessageHistory>>)),
+    NodeRunning((PeerId, Arc<RwLock<(MessageHistory, NodeStats)>>)),
     NodeStopped(PeerId),
     NodesConnected((PeerId, PeerId)),
 }

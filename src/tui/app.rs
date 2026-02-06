@@ -12,11 +12,11 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, field::debug, instrument};
+use tracing::{debug, instrument};
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent},
-    node::history::MessageHistory,
+    node::{NodeStats, history::MessageHistory},
     tui::{
         Tui, TuiEvent,
         components::{node_box::NodeBox, node_log::NodeLog},
@@ -56,8 +56,8 @@ pub struct App {
     /// to the node network process
     command_tx: mpsc::Sender<NetworkCommand>,
 
-    /// Message histories of the nodes
-    node_messages: HashMap<PeerId, Arc<RwLock<MessageHistory>>>,
+    /// Message histories and stats of the nodes
+    node_logs: HashMap<PeerId, Arc<RwLock<(MessageHistory, NodeStats)>>>,
 
     /// TUI components
     node_box: NodeBox,
@@ -92,7 +92,7 @@ impl App {
                 node_log: NodeLog::new(),
                 actions: VecDeque::new(),
                 focus: Focus::NodeBox,
-                node_messages: HashMap::new(),
+                node_logs: HashMap::new(),
             },
             cancellation_token,
             network_event_tx,
@@ -176,10 +176,10 @@ impl App {
                 self.quit = true;
             }
             Action::DisplayLogs(peer) => {
-                if let Some(message_history) = self.node_messages.get(&peer) {
+                if let Some(node_logs) = self.node_logs.get(&peer) {
                     debug!(target: "TUI App", "successfully got message history for node: {peer}");
 
-                    self.node_log.display_logs(message_history.clone());
+                    self.node_log.display_logs(node_logs.clone());
                 }
             }
             _ => {}
@@ -225,16 +225,16 @@ impl App {
     /// Process a network event from the node network and output an Action
     fn handle_network_event(&mut self, network_event: NetworkEvent) -> Option<Action> {
         match network_event {
-            NetworkEvent::NodeRunning((peer, message_history)) => {
+            NetworkEvent::NodeRunning((peer, node_logs)) => {
                 debug!(target: "TUI", "network event recieved: node running");
-                self.node_messages.insert(peer, message_history);
+                self.node_logs.insert(peer, node_logs);
 
                 Some(Action::AddNode(peer))
             }
             NetworkEvent::NodeStopped(peer) => {
                 debug!(target: "TUI", "network event recieved: node stopped");
 
-                self.node_messages.remove_entry(&peer);
+                self.node_logs.remove_entry(&peer);
                 Some(Action::RemoveNode(peer))
             }
             _ => None,

@@ -72,7 +72,7 @@ pub struct Node {
     current_peers: HashSet<PeerId>,
     known_peers: Vec<Multiaddr>,
 
-    message_history: Arc<RwLock<MessageHistory>>,
+    logs: Arc<RwLock<(MessageHistory, NodeStats)>>,
     kad_queries: KadQueries,
 
     // libp2p swarm listen address
@@ -80,8 +80,6 @@ pub struct Node {
 
     bootstrapped: bool,
     swarm: Swarm<NodeBehaviour>,
-
-    pub stats: Arc<Mutex<NodeStats>>,
 }
 
 impl Node {
@@ -124,7 +122,10 @@ impl Node {
             swarm::Config::with_tokio_executor(),
         );
 
-        let message_history = Arc::new(RwLock::new(MessageHistory::default()));
+        let logs = Arc::new(RwLock::new((
+            MessageHistory::default(),
+            NodeStats::default(),
+        )));
 
         let node = Node {
             peer_id,
@@ -132,19 +133,18 @@ impl Node {
             from_network: rx,
             current_peers: HashSet::new(),
             known_peers: vec![],
-            message_history: message_history.clone(),
+            logs: logs.clone(),
             kad_queries: KadQueries::default(),
             bootstrapped: false,
             swarm,
             listen_address,
-            stats: Arc::new(Mutex::new(NodeStats::default())),
         };
 
         Ok((node, tx))
     }
 
-    pub fn message_history_copy(&self) -> Arc<RwLock<MessageHistory>> {
-        self.message_history.clone()
+    pub fn logs_clone(&self) -> Arc<RwLock<(MessageHistory, NodeStats)>> {
+        self.logs.clone()
     }
 
     pub fn add_peer(&mut self, peer: Multiaddr) {
@@ -174,10 +174,7 @@ impl Node {
         );
 
         let _ = network_event_tx
-            .send(NetworkEvent::NodeRunning((
-                self.peer_id,
-                self.message_history_copy(),
-            )))
+            .send(NetworkEvent::NodeRunning((self.peer_id, self.logs.clone())))
             .await;
 
         self.swarm.listen_on(self.listen_address.clone())?;
@@ -207,7 +204,7 @@ impl Node {
                     break;
                 },
                 _ = interval.tick() => {
-                        let messages = self.message_history.read().unwrap();
+                        let messages = &self.logs.read().unwrap().0;
                         debug!(target: "node", "current node messages: {:?}", messages);
                 },
                 message = self.from_network.recv() => {
@@ -217,12 +214,12 @@ impl Node {
 
                     let command = message.unwrap();
                     self.handle_node_command(command);
-
-                    self.stats.lock().unwrap().recvd_count+= 1;
                 },
 
                 Some(event) = self.swarm.next() => {
                     trace!("node swarm event {:?}", event);
+                    self.logs.write().unwrap().1.recvd_count += 1;
+
                     match event {
                         SwarmEvent::Dialing { peer_id, ..} => {
                             debug!(target: "node", "dialing peer {:?}", peer_id);
@@ -232,9 +229,7 @@ impl Node {
                                     .with_p2p(*self.swarm.local_peer_id()).unwrap();
                             debug!(target: "node", "listening on p2p address {:?}", local_p2p_addr);
 
-                            let mut message_history = self.message_history.write().unwrap();
-
-                            message_history.add_swarm_event(SwarmEventInfo::NewListenAddr { listener_id, address }, Instant::now().duration_since(start).as_secs_f32());
+                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::NewListenAddr { listener_id, address }, Instant::now().duration_since(start).as_secs_f32());
                         },
                         SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                             debug!(target: "node", "new peer {} from {:?}", peer_id, endpoint);
@@ -245,9 +240,7 @@ impl Node {
                             };
                             self.swarm.behaviour_mut().kad.add_address(&peer_id, peer_addr);
 
-                            let mut message_history = self.message_history.write().unwrap();
-
-                            message_history.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
+                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
 
                             if !self.bootstrapped {
                                 debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
@@ -262,16 +255,13 @@ impl Node {
                         SwarmEvent::ConnectionClosed { peer_id, endpoint, cause, .. } => {
                             debug!(target: "node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
 
-                            let mut message_history = self.message_history.write().unwrap();
-
-                            message_history.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
+                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
 
                         },
                         SwarmEvent::ListenerClosed { listener_id, addresses, .. } => {
                             debug!(target: "node", "listener now closed");
-                            let mut message_history = self.message_history.write().unwrap();
 
-                            message_history.add_swarm_event(SwarmEventInfo::ListenerClosed { listener_id, addresses }, Instant::now().duration_since(start).as_secs_f32());
+                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ListenerClosed { listener_id, addresses }, Instant::now().duration_since(start).as_secs_f32());
                         }
                         SwarmEvent::IncomingConnectionError { peer_id, error, ..} => {
                                 error!(target: "node", "incoming connection failed, peer {:?}: {error}", peer_id);
@@ -279,11 +269,10 @@ impl Node {
                         SwarmEvent::Behaviour(NodeNetworkEvent::Identify(event)) => {
                             {
                                 debug!(target: "node", "new identify event been added");
-                                let mut message_history = self.message_history.write().unwrap();
 
                                 let event_string = identify_event_to_string(&event);
 
-                                message_history.add_identify_event(event_string, Instant::now().duration_since(start).as_secs_f32());
+                                self.logs.write().unwrap().0.add_identify_event(event_string, Instant::now().duration_since(start).as_secs_f32());
                             }
 
                             identify_handler::handle_event(self, event)?;
@@ -292,11 +281,9 @@ impl Node {
                         SwarmEvent::Behaviour(NodeNetworkEvent::Kademlia(event)) => {
                             {
                                 debug!(target: "node", "new kademlia event been added");
-                                let mut message_history = self.message_history.write().unwrap();
-
                                 let event_string = kad_event_to_string(&event);
 
-                                message_history.add_kademlia_event(event_string, Instant::now().duration_since(start).as_secs_f32());
+                                self.logs.write().unwrap().0.add_kademlia_event(event_string, Instant::now().duration_since(start).as_secs_f32());
                             }
 
                             kad_handler::handle_event(self, event)?;
@@ -333,31 +320,31 @@ impl Node {
     }
 
     pub fn identify_messages(&self) -> Vec<String> {
-        let messages = self.message_history.read().unwrap();
+        let messages = &self.logs.read().unwrap().0;
 
         messages.identify_messages()
     }
 
     pub fn kad_messages(&self) -> Vec<String> {
-        let messages = self.message_history.read().unwrap();
+        let messages = &self.logs.read().unwrap().0;
 
         messages.kad_messages()
     }
 
     pub fn swarm_messages(&self) -> Vec<String> {
-        let messages = self.message_history.read().unwrap();
+        let messages = &self.logs.read().unwrap().0;
 
         messages.swarm_messages()
     }
 
     pub fn all_messages(&self) -> Vec<String> {
-        let messages = self.message_history.read().unwrap();
+        let messages = &self.logs.read().unwrap().0;
 
         messages.all_messages()
     }
 
     pub fn get_stats(&self) -> NodeStats {
-        *self.stats.lock().unwrap()
+        self.logs.read().unwrap().1
     }
 }
 
