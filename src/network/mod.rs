@@ -92,26 +92,10 @@ impl NodeNetwork {
             debug!(target: "node_network", "new node task spawned");
         }
 
-        // As it is the nodes none of the nodes are connected to each other
-        // we must connect each one as we see fit to create a P2P network.
-        // We can use the mpsc channel to send the connect command to the node
-
-        let node_one = self.nodes.get(&peer_ids[0]).unwrap();
-        node_one
-            .send(NodeCommand::AddPeer(node_addresses[1].clone()))
-            .await
-            .unwrap();
-
-        let node_two = self.nodes.get(&peer_ids[1]).unwrap();
-        node_two
-            .send(NodeCommand::AddPeer(node_addresses[2].clone()))
-            .await
-            .unwrap();
-
         loop {
             tokio::select! {
                 _ =  cancellation_token.cancelled() => {
-                    debug!(target: "node_network", "-------------> cancellation token signal received");
+                    debug!(target: "node_network", "cancellation token signal received");
                     break;
                 }
                 Some(command) = network_command_rx.recv() => {
@@ -128,6 +112,12 @@ impl NodeNetwork {
         debug!(target: "node_network", "node tasks ended");
 
         Ok(())
+    }
+
+    fn handle_network_command(&mut self, command: NetworkCommand) {
+        //match command {
+        //    N
+        //}
     }
 }
 

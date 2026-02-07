@@ -74,14 +74,24 @@ impl NodeList {
 
                 // Get the index of the newly selected node
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                Some(Action::DisplayLogs(self.active_nodes[node_idx]))
+                Some(Action::DisplayLogs {
+                    peer_id: self.active_nodes[node_idx],
+                })
             }
             KeyCode::Down => {
                 self.select_next();
 
                 // Get the index of the newly selected node
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                Some(Action::DisplayLogs(self.active_nodes[node_idx]))
+                Some(Action::DisplayLogs {
+                    peer_id: self.active_nodes[node_idx],
+                })
+            }
+            KeyCode::Enter => {
+                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+                Some(Action::DisplayNodeCommands {
+                    peer_id: self.active_nodes[node_idx],
+                })
             }
             _ => None,
         }
@@ -117,13 +127,15 @@ impl NodeList {
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
 
-                    Some(Action::DisplayLogs(self.active_nodes[0]))
+                    Some(Action::DisplayLogs {
+                        peer_id: self.active_nodes[0],
+                    })
                 } else {
                     None
                 }
             }
-            Action::RemoveNode(peer) => {
-                self.active_nodes.swap_remove(&peer);
+            Action::RemoveNode { peer_id } => {
+                self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
 
                 None

@@ -174,11 +174,11 @@ impl Node {
         );
 
         let _ = network_event_tx
-            .send(NetworkEvent::NodeRunning((
-                self.peer_id,
-                self.logs.clone(),
-                self.current_peers.clone(),
-            )))
+            .send(NetworkEvent::NodeRunning {
+                peer_id: self.peer_id,
+                message_history: self.logs.clone(),
+                node_connections: self.current_peers.clone(),
+            })
             .await;
 
         self.swarm.listen_on(self.listen_address.clone())?;
@@ -304,7 +304,9 @@ impl Node {
         info!(target: "node", "node {} now shutting down", self.peer_id);
 
         let _ = network_event_tx
-            .send(NetworkEvent::NodeStopped(self.peer_id))
+            .send(NetworkEvent::NodeStopped {
+                peer_id: self.peer_id,
+            })
             .await;
 
         Ok(NodeResult::Success)
@@ -312,7 +314,8 @@ impl Node {
 
     fn handle_node_command(&mut self, command: NodeCommand) {
         match command {
-            NodeCommand::AddPeer(peer) => {
+            NodeCommand::ConnectTo { peer } => {
+                debug!(target: "node", "connect to command recieved: {peer}");
                 if self.swarm.dial(peer.clone()).is_ok() {
                     debug!(target: "node", "successully dialed peer {peer}");
                     self.known_peers.push(peer);

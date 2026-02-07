@@ -44,6 +44,9 @@ pub struct NodeBox {
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
 
+    /// If the component is currenlty in focus in the TUI
+    focus: bool,
+
     /// Hashmap representing the connections between the nodes
     node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
@@ -63,6 +66,7 @@ impl NodeBox {
             len: 0,
             x_bound: 180.0,
             y_bound: 90.0,
+            focus: false,
             node_coords: HashMap::default(),
             node_shapes: HashMap::default(),
             node_connections: HashMap::default(),
@@ -71,11 +75,18 @@ impl NodeBox {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let block = Block::new()
-            .title("Node Graph")
-            .title_alignment(Alignment::Center)
-            .borders(Borders::ALL)
-            .border_style(Color::LightRed);
+        let block = if self.focus {
+            Block::new()
+                .title("Node Graph")
+                .title_alignment(Alignment::Center)
+                .borders(Borders::ALL)
+                .border_style(Color::LightRed)
+        } else {
+            Block::new()
+                .title("Node Graph")
+                .title_alignment(Alignment::Center)
+                .borders(Borders::ALL)
+        };
 
         let nodes = &self.node_shapes;
         let connections = &self.lines;
@@ -100,7 +111,9 @@ impl NodeBox {
         canvas.render(area, frame.buffer_mut());
     }
 
-    fn update_selection_in_graph(&mut self, peer: PeerId) {
+    fn update_selection_in_graph(&mut self) {
+        let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+        let peer = self.active_nodes[node_idx];
         // Update nodes
         self.reset_nodes();
         if let Some(circle) = self.node_shapes.get_mut(&peer) {
@@ -127,6 +140,10 @@ impl NodeBox {
         self.lines.iter_mut().for_each(|(_, line)| {
             line.color = Color::White;
         });
+    }
+
+    pub fn focus(&mut self, focus: bool) {
+        self.focus = focus;
     }
 
     fn generate_node_on_canvas(&mut self, peer: &PeerId) -> Circle {
@@ -217,21 +234,15 @@ impl NodeBox {
                 self.select_previous();
 
                 // Get the index of the newly selected node
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                debug!(target: "node_box", "new node selected: {:?}", self.list_state.selected());
+                self.update_selection_in_graph();
 
-                self.update_selection_in_graph(self.active_nodes[node_idx]);
-                Some(Action::DisplayLogs(self.active_nodes[node_idx]))
+                None
             }
             KeyCode::Down => {
                 self.select_next();
+                self.update_selection_in_graph();
 
-                // Get the index of the newly selected node
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                debug!(target: "node_box", "new node selected: {:?}", self.list_state.selected());
-                self.update_selection_in_graph(self.active_nodes[node_idx]);
-
-                Some(Action::DisplayLogs(self.active_nodes[node_idx]))
+                None
             }
             _ => None,
         }
@@ -247,7 +258,7 @@ impl NodeBox {
 
     /// Moving up and down the listcan move past the bounds of the list,
     /// we must make sure it does not
-    pub fn clamp(&mut self, idx: usize) -> usize {
+    fn clamp(&mut self, idx: usize) -> usize {
         if idx >= self.len {
             self.list_state.select(Some(self.len - 1));
             self.len - 1
@@ -274,14 +285,17 @@ impl NodeBox {
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
+                    self.update_selection_in_graph();
 
-                    Some(Action::DisplayLogs(self.active_nodes[0]))
+                    Some(Action::DisplayLogs {
+                        peer_id: self.active_nodes[0],
+                    })
                 } else {
                     None
                 }
             }
-            Action::RemoveNode(peer) => {
-                self.active_nodes.swap_remove(&peer);
+            Action::RemoveNode { peer_id } => {
+                self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
 
                 None

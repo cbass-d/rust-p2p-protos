@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::net::Ipv4Addr;
 use std::sync::{Arc, RwLock};
 
 use libp2p::Multiaddr;
@@ -10,14 +9,14 @@ use crate::node::history::MessageHistory;
 
 #[derive(Debug)]
 pub enum NetworkEvent {
-    NodeRunning(
-        (
-            PeerId,
-            Arc<RwLock<(MessageHistory, NodeStats)>>,
-            Arc<RwLock<HashSet<PeerId>>>,
-        ),
-    ),
-    NodeStopped(PeerId),
+    NodeRunning {
+        peer_id: PeerId,
+        message_history: Arc<RwLock<(MessageHistory, NodeStats)>>,
+        node_connections: Arc<RwLock<HashSet<PeerId>>>,
+    },
+    NodeStopped {
+        peer_id: PeerId,
+    },
     NodesConnected {
         peer_one: PeerId,
         peer_two: PeerId,
@@ -26,12 +25,12 @@ pub enum NetworkEvent {
 
 #[derive(Debug)]
 pub enum NetworkCommand {
-    StartNode(PeerId),
-    StopNode(PeerId),
-    ConnectNodes((PeerId, PeerId)),
+    StartNode { peer_id: PeerId },
+    StopNode { peer_id: PeerId },
+    ConnectNodes { peer_one: PeerId, peer_two: PeerId },
 }
 
 #[derive(Debug)]
 pub enum NodeCommand {
-    AddPeer(Multiaddr),
+    ConnectTo { peer: Multiaddr },
 }
