@@ -18,7 +18,10 @@ pub enum NetworkEvent {
         ),
     ),
     NodeStopped(PeerId),
-    NodesConnected((PeerId, PeerId)),
+    NodesConnected {
+        peer_one: PeerId,
+        peer_two: PeerId,
+    },
 }
 
 #[derive(Debug)]

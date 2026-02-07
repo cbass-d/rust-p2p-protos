@@ -13,7 +13,7 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent},
@@ -39,6 +39,10 @@ pub enum Action {
     AddNode {
         peer_id: PeerId,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
+    },
+    UpdateConnections {
+        peer_one: PeerId,
+        peer_two: PeerId,
     },
     AddNodeToGraph((PeerId, Arc<RwLock<HashSet<PeerId>>>)),
     RemoveNode(PeerId),
@@ -144,7 +148,7 @@ impl App {
                 Some(tui_event) = tui.next() => {
                     let maybe_action = self.handle_tui_event(tui_event);
 
-                    debug!(target: "TUI", "TUI action being done: {:?}", maybe_action);
+                    trace!(target: "TUI", "TUI action being done: {:?}", maybe_action);
 
                     if let Some(action) = maybe_action {
                         self.update(action);
@@ -257,7 +261,11 @@ impl App {
                 self.node_logs.remove_entry(&peer);
                 Some(Action::RemoveNode(peer))
             }
-            _ => None,
+            NetworkEvent::NodesConnected { peer_one, peer_two } => {
+                debug!(target: "TUI", "updating connections between {} and {}", peer_one, peer_two);
+
+                Some(Action::UpdateConnections { peer_one, peer_two })
+            }
         }
     }
 

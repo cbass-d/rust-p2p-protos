@@ -243,6 +243,9 @@ impl Node {
 
                             self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
 
+                            // Send event of node connections
+                            network_event_tx.send(NetworkEvent::NodesConnected{peer_one: self.peer_id, peer_two: peer_id}).await.unwrap();
+
                             if !self.bootstrapped {
                                 debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
                                 if let Ok(qid) = self.swarm.behaviour_mut().kad.bootstrap() {

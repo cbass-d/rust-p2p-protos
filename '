@@ -52,7 +52,7 @@ pub struct NodeBox {
 
     node_coords: HashMap<PeerId, NodeCoords>,
     node_shapes: HashMap<PeerId, Circle>,
-    lines: HashMap<(PeerId, PeerId), Line>,
+    lines: HashMap<PeerId, Vec<Line>>,
 }
 
 impl NodeBox {
@@ -89,7 +89,6 @@ impl NodeBox {
             .y_bounds([-self.y_bound, self.y_bound])
             .paint(|ctx| {
                 // Draw connections first (behind)
-                connections.iter().for_each(|(_, line)| ctx.draw(line));
 
                 ctx.layer();
 
@@ -101,31 +100,15 @@ impl NodeBox {
     }
 
     fn update_selection_in_graph(&mut self, peer: PeerId) {
-        // Update nodes
         self.reset_nodes();
         if let Some(circle) = self.node_shapes.get_mut(&peer) {
             circle.color = Color::Red;
         }
-
-        // Update the lines
-        self.reset_lines();
-        self.lines
-            .iter_mut()
-            .filter(|(p, _)| p.0 == peer || p.1 == peer)
-            .for_each(|(_, line)| {
-                line.color = Color::Red;
-            });
     }
 
     fn reset_nodes(&mut self) {
         self.node_shapes.iter_mut().for_each(|(_, circle)| {
             circle.color = Color::White;
-        });
-    }
-
-    fn reset_lines(&mut self) {
-        self.lines.iter_mut().for_each(|(_, line)| {
-            line.color = Color::White;
         });
     }
 
@@ -155,60 +138,50 @@ impl NodeBox {
         }
     }
 
-    //fn generate_connections(&mut self, peer_one: &PeerId, peer_two: &PeerID) {
-    //    if let Some(connections) = self.node_connections.get(peer) {
-    //        let connections = connections.read().unwrap().clone();
-    //        for other_peer in connections {
-    //            self.connect_two_nodes(peer, &other_peer);
-    //        }
-    //    }
+    fn generate_connections(&mut self, peer: &PeerId) {
+        let connections = {
+            self.node_connections
+                .get(peer)
+                .unwrap()
+                .read()
+                .unwrap()
+                .clone()
+        };
 
-    //    debug!(target: "node_box", "current lines: {:?}", self.lines);
-    //}
-
-    fn update_connections(&mut self, peer_one: PeerId, peer_two: PeerId) {
-        if !self.lines.contains_key(&(peer_one, peer_two)) {
-            self.connect_two_nodes(peer_one, peer_two);
+        for other_peer in connections {
+            self.connect_two_nodes(peer, &other_peer);
         }
     }
 
-    fn connect_two_nodes(&mut self, peer_one: PeerId, peer_two: PeerId) {
-        let circle_one = self.node_shapes.get(&peer_one);
-        let circle_two = self.node_shapes.get(&peer_two);
+    fn connect_two_nodes(&mut self, peer_one: &PeerId, peer_two: &PeerId) {
+        let circle_one = self.node_shapes.get(peer_one).unwrap();
+        let circle_two = self.node_shapes.get(peer_two).unwrap();
 
-        debug!(target: "node_box", "attempting to connect {peer_one} and {peer_two}");
+        // Draw the line endpoints on the border of the circle
+        // rather than the center
+        let dx = circle_two.x - circle_one.x;
+        let dy = circle_two.y - circle_one.y;
+        let distance = (dx * dx + dy * dy).sqrt();
 
-        if circle_one.is_some() && circle_two.is_some() {
-            debug!(target: "node_box", "two nodes being connected on graph {peer_one} {peer_two}");
+        let nx = dx / distance;
+        let ny = dy / distance;
 
-            let circle_one = circle_one.unwrap();
-            let circle_two = circle_two.unwrap();
+        let x1 = circle_one.x + nx * RADIUS;
+        let y1 = circle_one.y + ny * RADIUS;
 
-            // Draw the line endpoints on the border of the circle
-            // rather than the center
-            let dx = circle_two.x - circle_one.x;
-            let dy = circle_two.y - circle_one.y;
-            let distance = (dx * dx + dy * dy).sqrt();
+        let x2 = circle_two.x - nx * RADIUS;
+        let y2 = circle_two.y - ny * RADIUS;
 
-            let nx = dx / distance;
-            let ny = dy / distance;
+        let line = Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            color: Color::White,
+        };
 
-            let x1 = circle_one.x + nx * RADIUS;
-            let y1 = circle_one.y + ny * RADIUS;
-
-            let x2 = circle_two.x - nx * RADIUS;
-            let y2 = circle_two.y - ny * RADIUS;
-
-            let line = Line {
-                x1,
-                y1,
-                x2,
-                y2,
-                color: Color::White,
-            };
-
-            self.lines.insert((peer_one, peer_two), line);
-        }
+        self.lines.get_mut(peer_one).unwrap().push(line.clone());
+        self.lines.get_mut(peer_two).unwrap().push(line);
     }
 
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
@@ -268,6 +241,7 @@ impl NodeBox {
                 self.len += 1;
 
                 let node = self.generate_node_on_canvas(&peer_id);
+                self.generate_connections(&peer_id);
                 self.node_shapes.insert(peer_id, node);
                 self.node_connections.insert(peer_id, node_connections);
 
@@ -283,11 +257,6 @@ impl NodeBox {
             Action::RemoveNode(peer) => {
                 self.active_nodes.swap_remove(&peer);
                 self.len -= 1;
-
-                None
-            }
-            Action::UpdateConnections { peer_one, peer_two } => {
-                self.update_connections(peer_one, peer_two);
 
                 None
             }
