@@ -144,6 +144,11 @@ impl NodeNetwork {
                         .unwrap();
                 }
             }
+            NetworkCommand::StopNode { peer_id } => {
+                if let Some(node_channel) = self.nodes.get(&peer_id) {
+                    node_channel.send(NodeCommand::Stop).await.unwrap();
+                }
+            }
             _ => {}
         }
     }

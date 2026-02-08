@@ -35,4 +35,5 @@ pub enum NetworkCommand {
 pub enum NodeCommand {
     ConnectTo { peer: Multiaddr },
     DisconnectFrom { peer: PeerId },
+    Stop,
 }

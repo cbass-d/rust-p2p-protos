@@ -19,31 +19,31 @@ use crate::tui::app::Action;
 
 #[derive(Debug)]
 pub struct NodeCommands {
+    /// The node for which we are performing commands for
     node: Option<PeerId>,
 
-    /// A IndexSet (a hashset that be accessed using []) of the actively
-    /// running nodes that is used to build the list
-    active_nodes: IndexSet<PeerId>,
-
-    /// Hashmap representing the connections between the nodes
-    node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
-
-    /// The length of the current list of active nodes
+    /// The length of the List
     len: usize,
 
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
+
+    /// If the component is currenlty in focus in the TUI
+    focus: bool,
 }
 
 impl NodeCommands {
     pub fn new() -> Self {
         Self {
             node: None,
-            active_nodes: IndexSet::new(),
-            node_connections: HashMap::default(),
-            len: 0,
-            list_state: ListState::default(),
+            len: 2,
+            list_state: ListState::default().with_selected(Some(0)),
+            focus: false,
         }
+    }
+
+    pub fn focus(&mut self, focus: bool) {
+        self.focus = focus;
     }
 
     pub fn select_next(&mut self) {
@@ -70,40 +70,25 @@ impl NodeCommands {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
-
-                // Get the index of the newly selected node
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
                 None
             }
             KeyCode::Down => {
                 self.select_next();
-
-                // Get the index of the newly selected node
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
                 None
             }
-            KeyCode::Char('c') => {
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+            KeyCode::Enter => {
+                let selection = self.clamp(self.list_state.selected().unwrap_or(0));
 
-                debug!(target: "node_commands", "connecting to peer: {}", self.active_nodes[node_idx]);
+                debug!(target: "node_commands", "node commands option {} selected", selection);
 
-                if let Some(peer_one) = self.node {
-                    let peer_two = self.active_nodes[node_idx];
-                    Some(Action::ConnectTo { peer_one, peer_two })
-                } else {
-                    None
-                }
-            }
-            KeyCode::Char('d') => {
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-
-                debug!(target: "node_commands", "disconnecting from peer: {}", self.active_nodes[node_idx]);
-
-                if let Some(peer_one) = self.node {
-                    let peer_two = self.active_nodes[node_idx];
-                    Some(Action::DisconnectFrom { peer_one, peer_two })
-                } else {
-                    None
+                match selection {
+                    0 => Some(Action::DisplayManageConnections {
+                        peer_id: self.node.unwrap(),
+                    }),
+                    1 => Some(Action::StopNode {
+                        peer_id: self.node.unwrap(),
+                    }),
+                    _ => None,
                 }
             }
             KeyCode::Esc => Some(Action::CloseNodeCommands),
@@ -117,11 +102,7 @@ impl NodeCommands {
         let footer_text = Line::from(vec![
             Span::raw("<Esc> exit"),
             Span::raw(", "),
-            Span::raw("<Up> <Down> select peer"),
-            Span::raw(", "),
-            Span::raw("<c> connect to peer"),
-            Span::raw(", "),
-            Span::raw("<d> disconnect from peer"),
+            Span::raw("<Up> <Down> select options"),
         ])
         .style(Style::new().fg(Color::White));
 
@@ -137,89 +118,24 @@ impl NodeCommands {
             return;
         }
 
-        let other_nodes = self.active_nodes.clone();
-
-        if other_nodes.is_empty() {
-            Paragraph::new("--- No other peers --- ")
-                .block(block)
-                .render(area, frame.buffer_mut());
-
-            return;
-        }
-
-        let list_items = self.format_peer_list(other_nodes);
+        let list_items = vec!["Manage Connections", "Remove Node (stop node)"];
 
         let list = List::new(list_items)
             .highlight_style(Style::new().reversed())
+            .highlight_symbol("*")
             .block(block);
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
-    }
-
-    /// Format the peer list to reflect active connections to be displayed
-    fn format_peer_list(&self, peer_list: IndexSet<PeerId>) -> Vec<String> {
-        if let Some(node) = self.node {
-            let connected_to = self.node_connections.get(&node).unwrap().read().unwrap();
-            peer_list
-                .iter()
-                .map(|p| {
-                    if connected_to.contains(p) {
-                        format!("[*] {}", p.to_string())
-                    } else {
-                        format!("[ ] {}", p.to_string())
-                    }
-                })
-                .collect::<Vec<String>>()
-        } else {
-            vec![]
-        }
     }
 
     pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::DisplayNodeCommands { peer_id } => {
                 self.node = Some(peer_id);
-                self.active_nodes.swap_remove(&peer_id);
                 None
             }
-            Action::CloseNodeCommands => {
-                if let Some(node) = self.node {
-                    self.active_nodes.insert(node);
-                }
-
-                None
-            }
-            Action::AddNode {
-                peer_id,
-                node_connections,
-            } => {
-                self.active_nodes.insert(peer_id);
-                self.len += 1;
-
-                self.node_connections.insert(peer_id, node_connections);
-
-                // Auto select the first node we add
-                if self.list_state.selected().is_none() {
-                    self.list_state = self.list_state.with_selected(Some(0));
-                }
-
-                None
-            }
-            Action::UpdateConnections { peer_one, peer_two } => None,
-            Action::RemoveNode { peer_id } => {
-                self.active_nodes.swap_remove(&peer_id);
-                self.len -= 1;
-
-                None
-            }
+            Action::CloseNodeCommands => None,
             _ => None,
         }
-    }
-
-    pub fn set_node_connections(
-        &mut self,
-        node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
-    ) {
-        self.node_connections = node_connections;
     }
 }

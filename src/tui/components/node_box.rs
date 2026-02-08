@@ -272,6 +272,10 @@ impl NodeBox {
         }
     }
 
+    fn remove_line(&mut self, peer_id: PeerId) {
+        self.lines.retain(|p, _| p.0 != peer_id && p.1 != peer_id);
+    }
+
     pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::AddNode {
@@ -302,6 +306,10 @@ impl NodeBox {
             Action::RemoveNode { peer_id } => {
                 self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
+
+                self.node_coords.remove(&peer_id);
+                self.node_shapes.remove(&peer_id);
+                self.remove_line(peer_id);
 
                 None
             }

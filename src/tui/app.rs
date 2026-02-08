@@ -20,7 +20,8 @@ use crate::{
     tui::{
         Tui, TuiEvent,
         components::{
-            node_box::NodeBox, node_commands::NodeCommands, node_list::NodeList, node_log::NodeLog,
+            manage_connections::ManageConnections, node_box::NodeBox, node_commands::NodeCommands,
+            node_list::NodeList, node_log::NodeLog,
         },
     },
 };
@@ -32,6 +33,7 @@ pub enum Focus {
     NodeLog,
     NodeList,
     NodeCommands,
+    ManageConnections,
 }
 
 /// The action which is the result of handling user input
@@ -45,6 +47,9 @@ pub enum Action {
     UpdateConnections {
         peer_one: PeerId,
         peer_two: PeerId,
+    },
+    StopNode {
+        peer_id: PeerId,
     },
     RemoveNode {
         peer_id: PeerId,
@@ -66,6 +71,9 @@ pub enum Action {
     DisconnectFrom {
         peer_one: PeerId,
         peer_two: PeerId,
+    },
+    DisplayManageConnections {
+        peer_id: PeerId,
     },
     CloseNodeCommands,
 }
@@ -97,6 +105,7 @@ pub struct App {
     node_log: NodeLog,
     node_list: NodeList,
     node_commands: NodeCommands,
+    manage_connections: ManageConnections,
 
     /// Queue of Actions to be performed
     actions: VecDeque<Action>,
@@ -127,6 +136,7 @@ impl App {
                 node_log: NodeLog::new(),
                 node_list: NodeList::new(),
                 node_commands: NodeCommands::new(),
+                manage_connections: ManageConnections::new(),
                 actions: VecDeque::new(),
                 focus: Focus::NodeList,
                 node_logs: HashMap::new(),
@@ -229,7 +239,17 @@ impl App {
                 }
             }
             Action::DisplayNodeCommands { peer_id } => {
+                debug!(target: "TUI App", "displaying node commands for {peer_id}");
+
                 self.focus = Focus::NodeCommands;
+                self.node_box.focus(false);
+                self.node_list.focus(false);
+            }
+            Action::DisplayManageConnections { peer_id } => {
+                debug!(target: "TUI App", "displaying manage connections for {peer_id}");
+
+                self.focus = Focus::ManageConnections;
+                self.node_commands.focus(false);
                 self.node_box.focus(false);
                 self.node_list.focus(false);
             }
@@ -250,6 +270,19 @@ impl App {
                     .await
                     .unwrap();
             }
+            Action::StopNode { peer_id } => {
+                self.command_tx
+                    .send(NetworkCommand::StopNode { peer_id })
+                    .await
+                    .unwrap();
+            }
+            Action::RemoveNode { peer_id } => {
+                self.node_commands.focus(false);
+
+                self.node_box.focus(true);
+                self.node_list.focus(true);
+                self.actions.push_back(Action::CloseNodeCommands);
+            }
             _ => {}
         }
 
@@ -264,6 +297,10 @@ impl App {
         }
 
         if let Some(action) = self.node_commands.update(action.clone()) {
+            self.actions.push_back(action);
+        }
+
+        if let Some(action) = self.manage_connections.update(action.clone()) {
             self.actions.push_back(action);
         }
 
@@ -295,6 +332,7 @@ impl App {
             Focus::NodeList => None,
             Focus::NodeLog => None,
             Focus::NodeCommands => None,
+            Focus::ManageConnections => None,
         }
     }
 
@@ -318,6 +356,7 @@ impl App {
                 debug!(target: "TUI", "network event recieved: node stopped");
 
                 self.node_logs.remove_entry(&peer_id);
+
                 Some(Action::RemoveNode { peer_id })
             }
             NetworkEvent::NodesConnected { peer_one, peer_two } => {
@@ -360,6 +399,12 @@ impl App {
                     self.update(action).await;
                 }
             }
+            Focus::ManageConnections => {
+                if let Some(action) = self.manage_connections.handle_key_event(key_event) {
+                    debug!(target: "TUI", "new action recieved from manage connections key event: {:?}", action);
+                    self.update(action).await;
+                }
+            }
         }
 
         Ok(())
@@ -381,6 +426,8 @@ impl App {
         self.node_log.render(frame, main_chunks[1]);
 
         if self.focus == Focus::NodeCommands {
+            debug!(target: "TUI", "rendering node commands");
+
             let rect = Rect {
                 x: frame.area().width / 4,
                 y: frame.area().height / 3,
@@ -388,6 +435,16 @@ impl App {
                 height: frame.area().height / 3,
             };
             self.node_commands.render(frame, rect);
+        } else if self.focus == Focus::ManageConnections {
+            debug!(target: "TUI", "rendering manage connections");
+
+            let rect = Rect {
+                x: frame.area().width / 4,
+                y: frame.area().height / 3,
+                width: frame.area().width / 2,
+                height: frame.area().height / 3,
+            };
+            self.manage_connections.render(frame, rect);
         }
     }
 

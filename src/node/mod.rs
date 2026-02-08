@@ -64,7 +64,7 @@ impl fmt::Display for NodeStats {
     }
 }
 
-// Node strucure representing a peer or participant in the network
+/// Node strucure representing a peer or participant in the network
 pub struct Node {
     pub peer_id: PeerId,
     to_network: mpsc::Sender<NodeCommand>,
@@ -75,8 +75,10 @@ pub struct Node {
     logs: Arc<RwLock<(MessageHistory, NodeStats)>>,
     kad_queries: KadQueries,
 
-    // libp2p swarm listen address
+    /// libp2p swarm listen address
     pub listen_address: Multiaddr,
+
+    quit: bool,
 
     bootstrapped: bool,
     swarm: Swarm<NodeBehaviour>,
@@ -135,6 +137,7 @@ impl Node {
             from_network: rx,
             current_peers: Arc::new(RwLock::new(HashSet::new())),
             known_peers: vec![],
+            quit: false,
             logs: logs.clone(),
             kad_queries: KadQueries::default(),
             bootstrapped: false,
@@ -202,7 +205,7 @@ impl Node {
 
         if !self.known_peers.is_empty() {}
 
-        loop {
+        while !self.quit {
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
                     debug!(target: "node", "cancellation token signal received");
@@ -338,6 +341,11 @@ impl Node {
                 } else {
                     warn!(target: "node", "failed to disconnect from {peer}");
                 }
+            }
+            NodeCommand::Stop => {
+                debug!(target: "node", "stop command received");
+
+                self.quit = true;
             }
         }
     }
