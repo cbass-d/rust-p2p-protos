@@ -28,9 +28,11 @@ pub enum NetworkCommand {
     StartNode { peer_id: PeerId },
     StopNode { peer_id: PeerId },
     ConnectNodes { peer_one: PeerId, peer_two: PeerId },
+    DisconectNodes { peer_one: PeerId, peer_two: PeerId },
 }
 
 #[derive(Debug)]
 pub enum NodeCommand {
     ConnectTo { peer: Multiaddr },
+    DisconnectFrom { peer: PeerId },
 }

@@ -91,7 +91,9 @@ impl Node {
     ///
     /// Returns the constructed node as well as the write end of the mpsc
     /// channel where the node will be recieving messages
-    pub fn new(to_network: mpsc::Sender<NodeCommand>) -> Result<(Self, mpsc::Sender<NodeCommand>)> {
+    pub fn new(
+        to_network: mpsc::Sender<NodeCommand>,
+    ) -> Result<(Self, mpsc::Sender<NodeCommand>, Multiaddr)> {
         // Build the mpsc channel where the channel will be recieving messages from
         let (tx, rx) = mpsc::channel(100);
 
@@ -137,10 +139,10 @@ impl Node {
             kad_queries: KadQueries::default(),
             bootstrapped: false,
             swarm,
-            listen_address,
+            listen_address: listen_address.clone(),
         };
 
-        Ok((node, tx))
+        Ok((node, tx, listen_address))
     }
 
     pub fn logs_clone(&self) -> Arc<RwLock<(MessageHistory, NodeStats)>> {
@@ -261,6 +263,9 @@ impl Node {
 
                             self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
 
+                            let mut current_peers = self.current_peers.write().unwrap();
+                            current_peers.remove(&peer_id);
+
                         },
                         SwarmEvent::ListenerClosed { listener_id, addresses, .. } => {
                             debug!(target: "node", "listener now closed");
@@ -321,6 +326,17 @@ impl Node {
                     self.known_peers.push(peer);
                 } else {
                     warn!(target: "node", "failed to dial peer {peer}");
+                }
+            }
+            NodeCommand::DisconnectFrom { peer } => {
+                debug!(target: "node", "disconnect from command received: {peer}");
+                if self.swarm.disconnect_peer_id(peer).is_ok() {
+                    debug!(target: "node", "successully disconnected from {peer}");
+
+                    let mut current_peers = self.current_peers.write().unwrap();
+                    current_peers.remove(&peer);
+                } else {
+                    warn!(target: "node", "failed to disconnect from {peer}");
                 }
             }
         }

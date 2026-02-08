@@ -183,6 +183,11 @@ impl NodeBox {
     //    debug!(target: "node_box", "current lines: {:?}", self.lines);
     //}
 
+    fn remove_connection(&mut self, peer_one: PeerId, peer_two: PeerId) {
+        self.lines.remove(&(peer_one, peer_two));
+        self.lines.remove(&(peer_two, peer_one));
+    }
+
     fn update_connections(&mut self, peer_one: PeerId, peer_two: PeerId) {
         if !self.lines.contains_key(&(peer_one, peer_two)) {
             self.connect_two_nodes(peer_one, peer_two);
@@ -303,6 +308,10 @@ impl NodeBox {
             Action::UpdateConnections { peer_one, peer_two } => {
                 self.update_connections(peer_one, peer_two);
 
+                None
+            }
+            Action::DisconnectFrom { peer_one, peer_two } => {
+                self.remove_connection(peer_one, peer_two);
                 None
             }
             _ => None,

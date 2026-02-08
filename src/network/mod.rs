@@ -1,5 +1,5 @@
 use color_eyre::eyre::Result;
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId};
 use std::collections::HashMap;
 use tokio::{sync::mpsc, task::JoinSet, time::Instant};
 use tokio_util::sync::CancellationToken;
@@ -16,7 +16,11 @@ use crate::{
 // from nodes to pass/forward to the destination node found in the message.
 #[derive(Debug)]
 pub struct NodeNetwork {
+    /// Mapping from peer id to mpsc channel for sending commands to node
     nodes: HashMap<PeerId, mpsc::Sender<NodeCommand>>,
+
+    /// Mapping from peer id to nodes libp2p multi-address
+    addresses: HashMap<PeerId, Multiaddr>,
 
     from_nodes: mpsc::Receiver<NodeCommand>,
     tx: mpsc::Sender<NodeCommand>,
@@ -34,6 +38,7 @@ impl NodeNetwork {
 
         NodeNetwork {
             nodes: HashMap::with_capacity(number_of_nodes as usize),
+            addresses: HashMap::new(),
             from_nodes: rx,
             tx,
             packets: 0,
@@ -43,8 +48,9 @@ impl NodeNetwork {
     // Builds and adds a new node into the network.
     // Returns a Node or an Err when the their is no more
     pub fn add_node(&mut self) -> Result<Node> {
-        let (node, tx) = Node::new(self.tx.clone())?;
+        let (node, tx, listen_adrress) = Node::new(self.tx.clone())?;
         self.nodes.insert(node.peer_id, tx);
+        self.addresses.insert(node.peer_id, listen_adrress);
 
         Ok(node)
     }
@@ -100,6 +106,8 @@ impl NodeNetwork {
                 }
                 Some(command) = network_command_rx.recv() => {
                     debug!(target: "node_network", "network command recieved {:?}", command);
+
+                    self.handle_network_command(command).await;
                 },
             }
         }
@@ -114,10 +122,30 @@ impl NodeNetwork {
         Ok(())
     }
 
-    fn handle_network_command(&mut self, command: NetworkCommand) {
-        //match command {
-        //    N
-        //}
+    async fn handle_network_command(&mut self, command: NetworkCommand) {
+        match command {
+            NetworkCommand::ConnectNodes { peer_one, peer_two } => {
+                if let Some(node_channel) = self.nodes.get(&peer_one) {
+                    if let Some(address) = self.addresses.get(&peer_two) {
+                        node_channel
+                            .send(NodeCommand::ConnectTo {
+                                peer: address.to_owned(),
+                            })
+                            .await
+                            .unwrap();
+                    }
+                }
+            }
+            NetworkCommand::DisconectNodes { peer_one, peer_two } => {
+                if let Some(node_channel) = self.nodes.get(&peer_one) {
+                    node_channel
+                        .send(NodeCommand::DisconnectFrom { peer: peer_two })
+                        .await
+                        .unwrap();
+                }
+            }
+            _ => {}
+        }
     }
 }
 

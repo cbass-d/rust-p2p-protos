@@ -55,6 +55,18 @@ pub enum Action {
     DisplayNodeCommands {
         peer_id: PeerId,
     },
+    /// Connect peer_one to peer_two
+    /// peer_one being the initiator
+    ConnectTo {
+        peer_one: PeerId,
+        peer_two: PeerId,
+    },
+    /// Disconnect peer_one from peer_two
+    /// peer_one being the initiator
+    DisconnectFrom {
+        peer_one: PeerId,
+        peer_two: PeerId,
+    },
     CloseNodeCommands,
 }
 
@@ -152,19 +164,19 @@ impl App {
                     debug!(target: "TUI", "Network event action being done: {:?}", maybe_action);
 
                     if let Some(action) = maybe_action {
-                        self.update(action);
-                        self.process_actions();
+                        self.update(action).await;
+                        self.process_actions().await;
                     }
 
                 }
                 Some(tui_event) = tui.next() => {
-                    let maybe_action = self.handle_tui_event(tui_event);
+                    let maybe_action = self.handle_tui_event(tui_event).await;
 
                     trace!(target: "TUI", "TUI action being done: {:?}", maybe_action);
 
                     if let Some(action) = maybe_action {
-                        self.update(action);
-                        self.process_actions();
+                        self.update(action).await;
+                        self.process_actions().await;
                     }
                 },
             }
@@ -202,7 +214,7 @@ impl App {
 
     /// Process an Action and update the state of the TUI application
     /// accordingly
-    fn update(&mut self, action: Action) {
+    async fn update(&mut self, action: Action) {
         debug!(target: "TUI App", "updating TUI using action: {:?}", action);
 
         match action {
@@ -225,6 +237,18 @@ impl App {
                 self.focus = Focus::NodeList;
                 self.node_box.focus(true);
                 self.node_list.focus(true);
+            }
+            Action::ConnectTo { peer_one, peer_two } => {
+                self.command_tx
+                    .send(NetworkCommand::ConnectNodes { peer_one, peer_two })
+                    .await
+                    .unwrap();
+            }
+            Action::DisconnectFrom { peer_one, peer_two } => {
+                self.command_tx
+                    .send(NetworkCommand::DisconectNodes { peer_one, peer_two })
+                    .await
+                    .unwrap();
             }
             _ => {}
         }
@@ -249,18 +273,19 @@ impl App {
     }
 
     /// Process the current actions in the queue
-    fn process_actions(&mut self) {
+    async fn process_actions(&mut self) {
         while let Some(action) = self.actions.pop_front() {
-            self.update(action);
+            self.update(action).await;
         }
     }
 
     /// Process a TUI event and output an Action
-    fn handle_tui_event(&mut self, event: TuiEvent) -> Option<Action> {
+    async fn handle_tui_event(&mut self, event: TuiEvent) -> Option<Action> {
         match event {
             TuiEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 let _ = self
                     .handle_key_event(key_event)
+                    .await
                     .wrap_err_with(|| format!("handling key event failed: {key_event:#?}"));
             }
             _ => {}
@@ -304,7 +329,7 @@ impl App {
     }
 
     /// Process key input from the TUI
-    fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
+    async fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
             KeyCode::Tab => self.switch_focus(),
@@ -315,24 +340,24 @@ impl App {
             Focus::NodeList => {
                 if let Some(action) = self.node_box.handle_key_event(key_event) {
                     debug!(target: "TUI", "new action recieved from node box key event: {:?}", action);
-                    self.update(action);
+                    self.update(action).await;
                 }
 
                 if let Some(action) = self.node_list.handle_key_event(key_event) {
                     debug!(target: "TUI", "new action recieved from node list key event: {:?}", action);
-                    self.update(action);
+                    self.update(action).await;
                 }
             }
             Focus::NodeLog => {
                 if let Some(action) = self.node_log.handle_key_event(key_event) {
                     debug!(target: "TUI", "new action recieved from node log key event: {:?}", action);
-                    self.update(action);
+                    self.update(action).await;
                 }
             }
             Focus::NodeCommands => {
                 if let Some(action) = self.node_commands.handle_key_event(key_event) {
                     debug!(target: "TUI", "new action recieved from node commands key event: {:?}", action);
-                    self.update(action);
+                    self.update(action).await;
                 }
             }
         }
