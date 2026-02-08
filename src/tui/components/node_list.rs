@@ -47,6 +47,7 @@ impl NodeList {
         let block = if self.focus {
             Block::new()
                 .title("Nodes")
+                .title_bottom("<a> add node")
                 .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_style(Color::LightRed)
@@ -87,6 +88,7 @@ impl NodeList {
                     peer_id: self.active_nodes[node_idx],
                 })
             }
+            KeyCode::Char('a') => Some(Action::StartNode),
             KeyCode::Enter => {
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
                 Some(Action::DisplayNodeCommands {

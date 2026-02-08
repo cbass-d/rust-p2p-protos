@@ -25,7 +25,7 @@ pub enum NetworkEvent {
 
 #[derive(Debug)]
 pub enum NetworkCommand {
-    StartNode { peer_id: PeerId },
+    StartNode,
     StopNode { peer_id: PeerId },
     ConnectNodes { peer_one: PeerId, peer_two: PeerId },
     DisconectNodes { peer_one: PeerId, peer_two: PeerId },

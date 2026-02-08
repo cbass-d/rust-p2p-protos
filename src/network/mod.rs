@@ -22,8 +22,14 @@ pub struct NodeNetwork {
     /// Mapping from peer id to nodes libp2p multi-address
     addresses: HashMap<PeerId, Multiaddr>,
 
+    network_event_tx: mpsc::Sender<NetworkEvent>,
+
+    cancellation_token: CancellationToken,
+
     from_nodes: mpsc::Receiver<NodeCommand>,
     tx: mpsc::Sender<NodeCommand>,
+
+    network_start: Instant,
 
     packets: u64,
 }
@@ -31,7 +37,11 @@ pub struct NodeNetwork {
 impl NodeNetwork {
     // Returns a new network with the specified network range set
     // by the start Ipv4 address and end Ipv4 address
-    pub fn new(number_of_nodes: u8) -> Self {
+    pub fn new(
+        number_of_nodes: u8,
+        network_event_tx: mpsc::Sender<NetworkEvent>,
+        cancellation_token: CancellationToken,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(100);
 
         debug!(target: "node_network", "node network built with {}", number_of_nodes);
@@ -40,6 +50,9 @@ impl NodeNetwork {
             nodes: HashMap::with_capacity(number_of_nodes as usize),
             addresses: HashMap::new(),
             from_nodes: rx,
+            network_event_tx,
+            cancellation_token,
+            network_start: Instant::now(),
             tx,
             packets: 0,
         }
@@ -65,31 +78,25 @@ impl NodeNetwork {
     pub async fn run(
         &mut self,
         number_of_nodes: u8,
-        network_event_tx: mpsc::Sender<NetworkEvent>,
         mut network_command_rx: mpsc::Receiver<NetworkCommand>,
-        cancellation_token: CancellationToken,
     ) -> Result<()> {
         info!(target: "node_network", "node network running with {} nodes", number_of_nodes);
 
-        // JoinSet for the aysnc tasks running the nodes
+        self.network_start = Instant::now();
+
         let mut node_task_set: JoinSet<Result<NodeResult>> = JoinSet::new();
 
-        let network_start = Instant::now();
-
-        let mut node_addresses = vec![];
-        let mut peer_ids = vec![];
         // Create and run the requested number of nodes
         for _ in 0..number_of_nodes {
             // Store the nodes Multiaddress for connecting the nodes in the future
             let mut node = self.add_node()?;
-            node_addresses.push(node.listen_address.clone());
-            peer_ids.push(node.peer_id);
 
             // Every node will be able to send network events and will have
             // a cancellation token to know when to stop
-            let _network_event_tx = network_event_tx.clone();
-            let _canceallation_token = cancellation_token.clone();
+            let _network_event_tx = self.network_event_tx.clone();
+            let _canceallation_token = self.cancellation_token.clone();
 
+            let network_start = self.network_start;
             node_task_set.spawn(async move {
                 node.run(network_start, _network_event_tx, _canceallation_token)
                     .await
@@ -100,14 +107,14 @@ impl NodeNetwork {
 
         loop {
             tokio::select! {
-                _ =  cancellation_token.cancelled() => {
+                _ =  self.cancellation_token.cancelled() => {
                     debug!(target: "node_network", "cancellation token signal received");
                     break;
                 }
                 Some(command) = network_command_rx.recv() => {
                     debug!(target: "node_network", "network command recieved {:?}", command);
 
-                    self.handle_network_command(command).await;
+                    node_task_set = self.handle_network_command(command, node_task_set).await;
                 },
             }
         }
@@ -122,7 +129,11 @@ impl NodeNetwork {
         Ok(())
     }
 
-    async fn handle_network_command(&mut self, command: NetworkCommand) {
+    async fn handle_network_command(
+        &mut self,
+        command: NetworkCommand,
+        mut node_task_set: JoinSet<Result<NodeResult>>,
+    ) -> JoinSet<Result<NodeResult>> {
         match command {
             NetworkCommand::ConnectNodes { peer_one, peer_two } => {
                 if let Some(node_channel) = self.nodes.get(&peer_one) {
@@ -149,8 +160,27 @@ impl NodeNetwork {
                     node_channel.send(NodeCommand::Stop).await.unwrap();
                 }
             }
+            NetworkCommand::StartNode => {
+                // Store the nodes Multiaddress for connecting the nodes in the future
+                let mut node = self.add_node().unwrap();
+
+                // Every node will be able to send network events and will have
+                // a cancellation token to know when to stop
+                let _network_event_tx = self.network_event_tx.clone();
+                let _canceallation_token = self.cancellation_token.clone();
+
+                let network_start = self.network_start;
+                node_task_set.spawn(async move {
+                    node.run(network_start, _network_event_tx, _canceallation_token)
+                        .await
+                });
+
+                debug!(target: "node_network", "new node task spawned");
+            }
             _ => {}
         }
+
+        node_task_set
     }
 }
 

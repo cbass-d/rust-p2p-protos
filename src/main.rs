@@ -46,8 +46,6 @@ async fn main() -> Result<()> {
     let args = CliArgs::parse();
     let number_of_nodes = args.nodes;
 
-    let mut network = NodeNetwork::new(number_of_nodes);
-
     // The task set will hold the TUI taks and the node network tasks
     // Using task set makes it easier to manage the waiting on tasks to finish
     let mut task_set: JoinSet<()> = JoinSet::new();
@@ -57,6 +55,12 @@ async fn main() -> Result<()> {
     // - network_command_rx: used for the node network receive commands from the TUI module
     let (mut app, cancellation_token, network_event_tx, network_command_rx) = App::new();
 
+    let mut network = NodeNetwork::new(
+        number_of_nodes,
+        network_event_tx.clone(),
+        cancellation_token.clone(),
+    );
+
     // Run the TUI task
     task_set.spawn(async move {
         let _ = app.run().await;
@@ -65,14 +69,7 @@ async fn main() -> Result<()> {
     // Run the node network task
     let _cancellation_token = cancellation_token.clone();
     task_set.spawn(async move {
-        let _ = network
-            .run(
-                number_of_nodes,
-                network_event_tx,
-                network_command_rx,
-                _cancellation_token,
-            )
-            .await;
+        let _ = network.run(number_of_nodes, network_command_rx).await;
     });
 
     // Wait for all the tasks to finish gracefully

@@ -40,6 +40,7 @@ pub enum Focus {
 #[derive(Debug, Clone)]
 pub enum Action {
     Quit,
+    StartNode,
     AddNode {
         peer_id: PeerId,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
@@ -282,6 +283,12 @@ impl App {
                 self.node_box.focus(true);
                 self.node_list.focus(true);
                 self.actions.push_back(Action::CloseNodeCommands);
+            }
+            Action::StartNode => {
+                self.command_tx
+                    .send(NetworkCommand::StartNode)
+                    .await
+                    .unwrap();
             }
             _ => {}
         }
