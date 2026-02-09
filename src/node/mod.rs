@@ -1,6 +1,7 @@
 mod behaviour;
 pub mod history;
 mod identify_handler;
+pub mod info;
 mod kad_handler;
 
 use color_eyre::eyre::Result;
@@ -22,18 +23,21 @@ use libp2p::{
 };
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex, RwLock},
-    time::Duration,
+    sync::{Arc, RwLock},
 };
-use tokio::{sync::mpsc, time::Instant};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Instant,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    messages::{NetworkEvent, NodeCommand},
+    messages::{NetworkEvent, NodeCommand, NodeResponse},
     node::{
         behaviour::{NodeBehaviour, NodeNetworkEvent},
         history::{MessageHistory, SwarmEventInfo, identify_event_to_string, kad_event_to_string},
+        info::IdentifyInfo,
         kad_handler::KadQueries,
     },
 };
@@ -64,24 +68,40 @@ impl fmt::Display for NodeStats {
     }
 }
 
-/// Node strucure representing a peer or participant in the network
+/// Node structure representing a peer participant in the network
 pub struct Node {
+    /// PeerId of the node in the libp2p swarm network
     pub peer_id: PeerId,
-    to_network: mpsc::Sender<NodeCommand>,
-    from_network: mpsc::Receiver<NodeCommand>,
+
+    /// mpsc channel for receiving commands to perform from the network
+    from_network: mpsc::Receiver<(NodeCommand, oneshot::Sender<NodeResponse>)>,
+
+    /// The peers the node has active connections to
     current_peers: Arc<RwLock<HashSet<PeerId>>>,
+
+    /// The peers the node knows or has previously seen
     known_peers: Vec<Multiaddr>,
 
+    /// Logs for libp2p swarm events
     logs: Arc<RwLock<(MessageHistory, NodeStats)>>,
     kad_queries: KadQueries,
 
     /// libp2p swarm listen address
     pub listen_address: Multiaddr,
 
+    /// Flag for stopping the node
     quit: bool,
 
+    /// Flag for the status of the Kademlia bootstrap process
     bootstrapped: bool,
+
+    /// The custom libp2p swarm behaviour
+    /// - identify
+    /// - kademlia
     swarm: Swarm<NodeBehaviour>,
+
+    /// Struct to hold local identify info (info that is pushed to other peers)
+    identify_info: IdentifyInfo,
 }
 
 impl Node {
@@ -93,9 +113,11 @@ impl Node {
     ///
     /// Returns the constructed node as well as the write end of the mpsc
     /// channel where the node will be recieving messages
-    pub fn new(
-        to_network: mpsc::Sender<NodeCommand>,
-    ) -> Result<(Self, mpsc::Sender<NodeCommand>, Multiaddr)> {
+    pub fn new() -> Result<(
+        Self,
+        mpsc::Sender<(NodeCommand, oneshot::Sender<NodeResponse>)>,
+        Multiaddr,
+    )> {
         // Build the mpsc channel where the channel will be recieving messages from
         let (tx, rx) = mpsc::channel(100);
 
@@ -131,9 +153,15 @@ impl Node {
             NodeStats::default(),
         )));
 
+        let identify_info = IdentifyInfo::new(
+            node_keys.public(),
+            IPFS_PROTO_NAME.to_string(),
+            NODE_NETWORK_AGENT.to_string(),
+            listen_address.clone(),
+        );
+
         let node = Node {
             peer_id,
-            to_network,
             from_network: rx,
             current_peers: Arc::new(RwLock::new(HashSet::new())),
             known_peers: vec![],
@@ -142,6 +170,7 @@ impl Node {
             kad_queries: KadQueries::default(),
             bootstrapped: false,
             swarm,
+            identify_info,
             listen_address: listen_address.clone(),
         };
 
@@ -216,8 +245,10 @@ impl Node {
                         continue;
                     }
 
-                    let command = message.unwrap();
-                    self.handle_node_command(command);
+                    let (command, response_tx) = message.unwrap();
+                    if let Some(response) = self.handle_node_command(command) {
+                        response_tx.send(response).unwrap();
+                    }
                 },
 
                 Some(event) = self.swarm.next() => {
@@ -320,7 +351,7 @@ impl Node {
         Ok(NodeResult::Success)
     }
 
-    fn handle_node_command(&mut self, command: NodeCommand) {
+    fn handle_node_command(&mut self, command: NodeCommand) -> Option<NodeResponse> {
         match command {
             NodeCommand::ConnectTo { peer } => {
                 debug!(target: "node", "connect to command recieved: {peer}");
@@ -330,6 +361,8 @@ impl Node {
                 } else {
                     warn!(target: "node", "failed to dial peer {peer}");
                 }
+
+                None
             }
             NodeCommand::DisconnectFrom { peer } => {
                 debug!(target: "node", "disconnect from command received: {peer}");
@@ -341,11 +374,20 @@ impl Node {
                 } else {
                     warn!(target: "node", "failed to disconnect from {peer}");
                 }
+
+                None
+            }
+            NodeCommand::GetIdentifyInfo => {
+                let info = self.identify_info.clone();
+
+                Some(NodeResponse::IdentifyInfo { info })
             }
             NodeCommand::Stop => {
                 debug!(target: "node", "stop command received");
 
                 self.quit = true;
+
+                None
             }
         }
     }

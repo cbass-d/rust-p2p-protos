@@ -1,4 +1,5 @@
 pub mod identify_info;
+pub mod kademlia_info;
 pub mod manage_connections;
 pub mod node_box;
 pub mod node_commands;

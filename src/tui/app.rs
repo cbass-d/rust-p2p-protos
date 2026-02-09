@@ -10,7 +10,7 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent, KeyEventKind},
     layout::{Constraint, Direction, Layout, Rect},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace};
 
@@ -72,6 +72,12 @@ pub enum Action {
     /// Display the node info popup for the selected node
     DisplayInfo { peer_id: PeerId },
 
+    /// Display the node identify info popup for the selected node
+    DisplayIdentifyInfo { peer_id: PeerId },
+
+    /// Display the node kademlia info popup for the selected node
+    DisplayKademliaInfo { peer_id: PeerId },
+
     /// Connect peer_one to peer_two, peer_one being the initiator
     ConnectTo { peer_one: PeerId, peer_two: PeerId },
 
@@ -89,6 +95,9 @@ pub enum Action {
         content: PopUpContent,
         peer_id: PeerId,
     },
+
+    /// Get Identify info for node
+    GetIdentifyInfo { peer_id: PeerId },
 }
 
 #[derive(Debug)]
@@ -289,6 +298,15 @@ impl App {
 
                 self.unfocus_list_graph();
             }
+            Action::DisplayIdentifyInfo { peer_id } => {
+                debug!(target: "TUI App", "displaying identify info for node {peer_id}");
+                self.command_tx
+                    .send(NetworkCommand::GetIdentifyInfo { peer_id })
+                    .await
+                    .unwrap();
+
+                self.unfocus_list_graph();
+            }
             Action::CloseNodeCommands => {
                 self.focus_list_graph();
             }
@@ -404,6 +422,9 @@ impl App {
                 debug!(target: "TUI", "updating connections between {} and {}", peer_one, peer_two);
 
                 actions.push_back(Action::UpdateConnections { peer_one, peer_two });
+            }
+            NetworkEvent::IdentifyInfo { info } => {
+                self.popup.identify_info.set_info(info);
             }
         }
     }

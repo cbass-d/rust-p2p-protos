@@ -6,6 +6,7 @@ use libp2p::PeerId;
 
 use crate::node::NodeStats;
 use crate::node::history::MessageHistory;
+use crate::node::info::IdentifyInfo;
 
 #[derive(Debug)]
 pub enum NetworkEvent {
@@ -21,6 +22,9 @@ pub enum NetworkEvent {
         peer_one: PeerId,
         peer_two: PeerId,
     },
+    IdentifyInfo {
+        info: IdentifyInfo,
+    },
 }
 
 #[derive(Debug)]
@@ -29,11 +33,18 @@ pub enum NetworkCommand {
     StopNode { peer_id: PeerId },
     ConnectNodes { peer_one: PeerId, peer_two: PeerId },
     DisconectNodes { peer_one: PeerId, peer_two: PeerId },
+    GetIdentifyInfo { peer_id: PeerId },
 }
 
 #[derive(Debug)]
 pub enum NodeCommand {
     ConnectTo { peer: Multiaddr },
     DisconnectFrom { peer: PeerId },
+    GetIdentifyInfo,
     Stop,
+}
+
+#[derive(Debug)]
+pub enum NodeResponse {
+    IdentifyInfo { info: IdentifyInfo },
 }

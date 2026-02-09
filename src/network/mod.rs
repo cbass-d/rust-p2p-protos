@@ -1,12 +1,16 @@
 use color_eyre::eyre::Result;
 use libp2p::{Multiaddr, PeerId};
 use std::collections::HashMap;
-use tokio::{sync::mpsc, task::JoinSet, time::Instant};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinSet,
+    time::Instant,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
 
 use crate::{
-    messages::{NetworkCommand, NetworkEvent, NodeCommand},
+    messages::{NetworkCommand, NetworkEvent, NodeCommand, NodeResponse},
     node::{Node, NodeResult},
 };
 
@@ -17,7 +21,7 @@ use crate::{
 #[derive(Debug)]
 pub struct NodeNetwork {
     /// Mapping from peer id to mpsc channel for sending commands to node
-    nodes: HashMap<PeerId, mpsc::Sender<NodeCommand>>,
+    nodes: HashMap<PeerId, mpsc::Sender<(NodeCommand, oneshot::Sender<NodeResponse>)>>,
 
     /// Mapping from peer id to nodes libp2p multi-address
     addresses: HashMap<PeerId, Multiaddr>,
@@ -25,9 +29,6 @@ pub struct NodeNetwork {
     network_event_tx: mpsc::Sender<NetworkEvent>,
 
     cancellation_token: CancellationToken,
-
-    from_nodes: mpsc::Receiver<NodeCommand>,
-    tx: mpsc::Sender<NodeCommand>,
 
     network_start: Instant,
 
@@ -42,18 +43,14 @@ impl NodeNetwork {
         network_event_tx: mpsc::Sender<NetworkEvent>,
         cancellation_token: CancellationToken,
     ) -> Self {
-        let (tx, rx) = mpsc::channel(100);
-
         debug!(target: "node_network", "node network built with {}", number_of_nodes);
 
         NodeNetwork {
             nodes: HashMap::with_capacity(number_of_nodes as usize),
             addresses: HashMap::new(),
-            from_nodes: rx,
             network_event_tx,
             cancellation_token,
             network_start: Instant::now(),
-            tx,
             packets: 0,
         }
     }
@@ -61,7 +58,7 @@ impl NodeNetwork {
     // Builds and adds a new node into the network.
     // Returns a Node or an Err when the their is no more
     pub fn add_node(&mut self) -> Result<Node> {
-        let (node, tx, listen_adrress) = Node::new(self.tx.clone())?;
+        let (node, tx, listen_adrress) = Node::new()?;
         self.nodes.insert(node.peer_id, tx);
         self.addresses.insert(node.peer_id, listen_adrress);
 
@@ -138,10 +135,14 @@ impl NodeNetwork {
             NetworkCommand::ConnectNodes { peer_one, peer_two } => {
                 if let Some(node_channel) = self.nodes.get(&peer_one) {
                     if let Some(address) = self.addresses.get(&peer_two) {
+                        let (tx, reply_rx) = oneshot::channel();
                         node_channel
-                            .send(NodeCommand::ConnectTo {
-                                peer: address.to_owned(),
-                            })
+                            .send((
+                                NodeCommand::ConnectTo {
+                                    peer: address.to_owned(),
+                                },
+                                tx,
+                            ))
                             .await
                             .unwrap();
                     }
@@ -149,15 +150,40 @@ impl NodeNetwork {
             }
             NetworkCommand::DisconectNodes { peer_one, peer_two } => {
                 if let Some(node_channel) = self.nodes.get(&peer_one) {
+                    let (tx, reply_rx) = oneshot::channel();
                     node_channel
-                        .send(NodeCommand::DisconnectFrom { peer: peer_two })
+                        .send((NodeCommand::DisconnectFrom { peer: peer_two }, tx))
                         .await
                         .unwrap();
                 }
             }
+            NetworkCommand::GetIdentifyInfo { peer_id } => {
+                if let Some(node_channel) = self.nodes.get(&peer_id) {
+                    let (tx, reply_rx) = oneshot::channel();
+
+                    node_channel
+                        .send((NodeCommand::GetIdentifyInfo, tx))
+                        .await
+                        .unwrap();
+
+                    let response = reply_rx.await.unwrap();
+
+                    debug!(target: "node_network", "received identify info: {:?}", response);
+
+                    match response {
+                        NodeResponse::IdentifyInfo { info } => {
+                            self.network_event_tx
+                                .send(NetworkEvent::IdentifyInfo { info })
+                                .await
+                                .unwrap();
+                        }
+                    }
+                }
+            }
             NetworkCommand::StopNode { peer_id } => {
                 if let Some(node_channel) = self.nodes.get(&peer_id) {
-                    node_channel.send(NodeCommand::Stop).await.unwrap();
+                    let (tx, reply_rx) = oneshot::channel();
+                    node_channel.send((NodeCommand::Stop, tx)).await.unwrap();
                 }
             }
             NetworkCommand::StartNode => {

@@ -9,6 +9,7 @@ use tracing::debug;
 use crate::tui::{
     app::Action,
     components::{
+        identify_info::IdentifyInfo, kademlia_info::KademliaInfo,
         manage_connections::ManageConnections, node_commands::NodeCommands, node_info::NodeInfo,
     },
 };
@@ -19,6 +20,8 @@ pub enum PopUpContent {
     NodeCommands,
     ManageConnections,
     NodeInfo,
+    IdentifyInfo,
+    KademliaInfo,
 }
 
 #[derive(Debug)]
@@ -38,6 +41,12 @@ pub struct Popup {
     /// Component for NodeCommmands content
     pub node_info: NodeInfo,
 
+    /// Component for IdentifyInfo content
+    pub identify_info: IdentifyInfo,
+
+    /// Component for KademliaInfo content
+    pub kademlia_info: KademliaInfo,
+
     /// Component for NodeCommmands content
     pub manage_connections: ManageConnections,
 }
@@ -49,6 +58,8 @@ impl Popup {
             content: None,
             node_commands: NodeCommands::new(),
             node_info: NodeInfo::new(),
+            identify_info: IdentifyInfo::new(),
+            kademlia_info: KademliaInfo::new(),
             manage_connections: ManageConnections::new(),
             focus: false,
         }
@@ -56,9 +67,11 @@ impl Popup {
 
     pub fn set_node(&mut self, node: PeerId) {
         self.node = Some(node);
+        self.node_commands.set_node(node);
         self.manage_connections.set_node(node);
         self.node_info.set_node(node);
-        self.node_commands.set_node(node);
+        self.identify_info.set_node(node);
+        self.kademlia_info.set_node(node);
     }
 
     pub fn set_content(&mut self, content: PopUpContent) {
@@ -80,7 +93,13 @@ impl Popup {
             Some(PopUpContent::ManageConnections) => {
                 self.manage_connections.render(frame, area);
             }
-            None => {}
+            Some(PopUpContent::IdentifyInfo) => {
+                self.identify_info.render(frame, area);
+            }
+            Some(PopUpContent::KademliaInfo) => {
+                self.kademlia_info.render(frame, area);
+            }
+            _ => {}
         }
     }
 
@@ -91,6 +110,12 @@ impl Popup {
             }
             Action::DisplayInfo { peer_id } => {
                 self.set_content(PopUpContent::NodeInfo);
+            }
+            Action::DisplayIdentifyInfo { peer_id } => {
+                self.set_content(PopUpContent::IdentifyInfo);
+            }
+            Action::DisplayKademliaInfo { peer_id } => {
+                self.set_content(PopUpContent::KademliaInfo);
             }
             _ => {}
         }
@@ -109,10 +134,16 @@ impl Popup {
             Some(PopUpContent::NodeCommands) => {
                 self.node_commands.handle_key_event(key_event, actions)?
             }
-            Some(PopUpContent::NodeInfo) => self.node_info.handle_key_event(key_event, actions)?,
             Some(PopUpContent::ManageConnections) => self
                 .manage_connections
                 .handle_key_event(key_event, actions)?,
+            Some(PopUpContent::NodeInfo) => self.node_info.handle_key_event(key_event, actions)?,
+            Some(PopUpContent::IdentifyInfo) => {
+                self.identify_info.handle_key_event(key_event, actions)?
+            }
+            Some(PopUpContent::KademliaInfo) => {
+                self.kademlia_info.handle_key_event(key_event, actions)?
+            }
             _ => {}
         }
 

@@ -1,8 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, RwLock},
 };
 
+use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
@@ -15,7 +16,10 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::tui::app::Action;
+use crate::{
+    node::info::IdentifyInfo as NodeIdentifyInfo,
+    tui::{app::Action, components::popup::PopUpContent},
+};
 
 #[derive(Debug)]
 pub struct IdentifyInfo {
@@ -28,6 +32,8 @@ pub struct IdentifyInfo {
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
 
+    info: Option<NodeIdentifyInfo>,
+
     /// If the component is currenlty in focus in the TUI
     focus: bool,
 }
@@ -38,8 +44,17 @@ impl IdentifyInfo {
             node: None,
             len: 2,
             list_state: ListState::default().with_selected(Some(0)),
+            info: None,
             focus: false,
         }
+    }
+
+    pub fn set_node(&mut self, node: PeerId) {
+        self.node = Some(node);
+    }
+
+    pub fn set_info(&mut self, info: NodeIdentifyInfo) {
+        self.info = Some(info);
     }
 
     pub fn focus(&mut self, focus: bool) {
@@ -66,34 +81,34 @@ impl IdentifyInfo {
         }
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
+    pub fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
-                None
             }
             KeyCode::Down => {
                 self.select_next();
-                None
             }
             KeyCode::Enter => {
                 let selection = self.clamp(self.list_state.selected().unwrap_or(0));
 
                 debug!(target: "node_commands", "node commands option {} selected", selection);
-
-                match selection {
-                    0 => Some(Action::DisplayManageConnections {
-                        peer_id: self.node.unwrap(),
-                    }),
-                    1 => Some(Action::StopNode {
-                        peer_id: self.node.unwrap(),
-                    }),
-                    _ => None,
-                }
             }
-            KeyCode::Esc => Some(Action::CloseNodeCommands),
-            _ => None,
+            // We return back to the node commands when pressing esc (exit)
+            KeyCode::Esc => {
+                actions.push_back(Action::Popup {
+                    content: PopUpContent::NodeInfo,
+                    peer_id: self.node.unwrap(),
+                });
+            }
+            _ => {}
         }
+
+        Ok(())
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -107,7 +122,7 @@ impl IdentifyInfo {
         .style(Style::new().fg(Color::White));
 
         let block = Block::new()
-            .title("Identify Commands")
+            .title("Identify Info")
             .title_alignment(Alignment::Center)
             .title_bottom(footer_text)
             .borders(Borders::ALL)
@@ -118,24 +133,32 @@ impl IdentifyInfo {
             return;
         }
 
-        let list_items = vec!["", "Remove Node (stop node)"];
-
-        let list = List::new(list_items)
-            .highlight_style(Style::new().reversed())
-            .highlight_symbol("*")
-            .block(block);
-
-        frame.render_stateful_widget(list, area, &mut self.list_state);
+        if self.info.is_none() {
+            Paragraph::new("--- No info to display ---")
+                .block(block)
+                .alignment(Alignment::Center)
+                .render(area, frame.buffer_mut());
+        } else {
+            let info = self.info.clone().unwrap();
+            let lines = Text::from(vec![
+                Line::from(format!("{:?}", info.public_key)),
+                Line::from(format!("Protocol Version: {}", info.protocol_version)),
+                Line::from(format!("Agent String: {}", info.agent_string)),
+                Line::from(format!("Listen Address: {}", info.listen_addr.to_string())),
+            ]);
+            Paragraph::new(lines)
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .render(area, frame.buffer_mut());
+        }
     }
 
-    pub fn update(&mut self, action: Action) -> Option<Action> {
+    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayNodeCommands { peer_id } => {
                 self.node = Some(peer_id);
-                None
             }
-            Action::CloseNodeCommands => None,
-            _ => None,
+            _ => {}
         }
     }
 }
