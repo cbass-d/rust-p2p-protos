@@ -12,7 +12,7 @@ use ratatui::{
     },
 };
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     sync::{Arc, RwLock},
 };
 use tracing::debug;
@@ -49,11 +49,13 @@ impl NodeLog {
         self.focus = focus;
     }
 
-    pub fn update(&mut self, action: Action) -> Option<Action> {
-        None
-    }
+    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {}
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
+    pub fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
@@ -70,7 +72,7 @@ impl NodeLog {
             _ => {}
         }
 
-        None
+        Ok(())
     }
 
     pub fn select_next(&mut self) {

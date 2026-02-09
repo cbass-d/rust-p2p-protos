@@ -1,5 +1,6 @@
+use color_eyre::eyre::Result;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, RwLock},
 };
 
@@ -15,7 +16,7 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::tui::app::Action;
+use crate::tui::{app::Action, components::popup::PopUpContent};
 
 #[derive(Debug)]
 pub struct ManageConnections {
@@ -46,6 +47,10 @@ impl ManageConnections {
         }
     }
 
+    pub fn set_node(&mut self, node: PeerId) {
+        self.node = Some(node);
+    }
+
     pub fn select_next(&mut self) {
         self.list_state.select_next();
     }
@@ -66,16 +71,17 @@ impl ManageConnections {
         }
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
+    pub fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
-                None
             }
             KeyCode::Down => {
                 self.select_next();
-
-                None
             }
             KeyCode::Char('c') => {
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
@@ -84,9 +90,7 @@ impl ManageConnections {
 
                 if let Some(peer_one) = self.node {
                     let peer_two = self.active_nodes[node_idx];
-                    Some(Action::ConnectTo { peer_one, peer_two })
-                } else {
-                    None
+                    actions.push_back(Action::ConnectTo { peer_one, peer_two });
                 }
             }
             KeyCode::Char('d') => {
@@ -96,17 +100,20 @@ impl ManageConnections {
 
                 if let Some(peer_one) = self.node {
                     let peer_two = self.active_nodes[node_idx];
-                    Some(Action::DisconnectFrom { peer_one, peer_two })
-                } else {
-                    None
+                    actions.push_back(Action::DisconnectFrom { peer_one, peer_two });
                 }
             }
             // We return back to the node commands when pressing esc (exit)
-            KeyCode::Esc => Some(Action::DisplayNodeCommands {
-                peer_id: self.node.unwrap(),
-            }),
-            _ => None,
+            KeyCode::Esc => {
+                actions.push_back(Action::Popup {
+                    content: PopUpContent::NodeCommands,
+                    peer_id: self.node.unwrap(),
+                });
+            }
+            _ => {}
         }
+
+        Ok(())
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -174,19 +181,16 @@ impl ManageConnections {
         }
     }
 
-    pub fn update(&mut self, action: Action) -> Option<Action> {
+    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayManageConnections { peer_id } => {
                 self.node = Some(peer_id);
                 self.active_nodes.swap_remove(&peer_id);
-                None
             }
             Action::CloseNodeCommands => {
                 if let Some(node) = self.node {
                     self.active_nodes.insert(node);
                 }
-
-                None
             }
             Action::AddNode {
                 peer_id,
@@ -201,16 +205,12 @@ impl ManageConnections {
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
                 }
-
-                None
             }
             Action::RemoveNode { peer_id } => {
                 self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
-
-                None
             }
-            _ => None,
+            _ => {}
         }
     }
 }

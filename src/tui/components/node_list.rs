@@ -1,3 +1,7 @@
+use color_eyre::eyre::Result;
+use std::collections::VecDeque;
+use tracing::debug;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
@@ -8,7 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListState},
 };
 
-use crate::tui::app::Action;
+use crate::tui::{app::Action, components::popup::PopUpContent};
 
 /// A display for the currently active nodes
 /// Consists of a list that can be iterated through by
@@ -44,16 +48,21 @@ impl NodeList {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let block = if self.focus {
+        let mut block = if self.focus {
             Block::new()
                 .title("Nodes")
-                .title_bottom("<a> add node")
                 .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_style(Color::LightRed)
         } else {
             Block::new().title("Nodes").borders(Borders::ALL)
         };
+
+        if self.active_nodes.len() < 10 {
+            block = block.title_bottom("<a> Add to add node");
+        } else {
+            block = block.title_bottom("MAX NODES");
+        }
 
         let list = List::new(
             self.active_nodes
@@ -68,35 +77,44 @@ impl NodeList {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
+    pub fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
 
                 // Get the index of the newly selected node
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                Some(Action::DisplayLogs {
+                actions.push_back(Action::DisplayLogs {
                     peer_id: self.active_nodes[node_idx],
-                })
+                });
             }
             KeyCode::Down => {
                 self.select_next();
 
                 // Get the index of the newly selected node
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                Some(Action::DisplayLogs {
+                actions.push_back(Action::DisplayLogs {
                     peer_id: self.active_nodes[node_idx],
-                })
+                });
             }
-            KeyCode::Char('a') => Some(Action::StartNode),
+            KeyCode::Char('a') => {
+                actions.push_back(Action::StartNode);
+            }
             KeyCode::Enter => {
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                Some(Action::DisplayNodeCommands {
+                actions.push_back(Action::Popup {
+                    content: PopUpContent::NodeCommands,
                     peer_id: self.active_nodes[node_idx],
-                })
+                });
             }
-            _ => None,
+            _ => {}
         }
+
+        Ok(())
     }
 
     pub fn select_next(&mut self) {
@@ -119,7 +137,7 @@ impl NodeList {
         }
     }
 
-    pub fn update(&mut self, action: Action) -> Option<Action> {
+    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::AddNode { peer_id, .. } => {
                 self.active_nodes.insert(peer_id);
@@ -129,20 +147,20 @@ impl NodeList {
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
 
-                    Some(Action::DisplayLogs {
+                    debug!(target: "node_list", "display log action added");
+
+                    actions.push_back(Action::DisplayLogs {
                         peer_id: self.active_nodes[0],
-                    })
-                } else {
-                    None
+                    });
+
+                    debug!(target: "node_list", "display log action added");
                 }
             }
             Action::RemoveNode { peer_id } => {
                 self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
-
-                None
             }
-            _ => None,
+            _ => {}
         }
     }
 }

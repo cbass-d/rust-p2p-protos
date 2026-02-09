@@ -1,5 +1,6 @@
+use color_eyre::eyre::Result;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, RwLock},
 };
 
@@ -233,24 +234,26 @@ impl NodeBox {
         }
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
+    pub fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
 
                 // Get the index of the newly selected node
                 self.update_selection_in_graph();
-
-                None
             }
             KeyCode::Down => {
                 self.select_next();
                 self.update_selection_in_graph();
-
-                None
             }
-            _ => None,
+            _ => {}
         }
+
+        Ok(())
     }
 
     pub fn select_next(&mut self) {
@@ -276,7 +279,7 @@ impl NodeBox {
         self.lines.retain(|p, _| p.0 != peer_id && p.1 != peer_id);
     }
 
-    pub fn update(&mut self, action: Action) -> Option<Action> {
+    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::AddNode {
                 peer_id,
@@ -296,11 +299,9 @@ impl NodeBox {
                     self.list_state = self.list_state.with_selected(Some(0));
                     self.update_selection_in_graph();
 
-                    Some(Action::DisplayLogs {
+                    actions.push_back(Action::DisplayLogs {
                         peer_id: self.active_nodes[0],
-                    })
-                } else {
-                    None
+                    });
                 }
             }
             Action::RemoveNode { peer_id } => {
@@ -310,19 +311,14 @@ impl NodeBox {
                 self.node_coords.remove(&peer_id);
                 self.node_shapes.remove(&peer_id);
                 self.remove_line(peer_id);
-
-                None
             }
             Action::UpdateConnections { peer_one, peer_two } => {
                 self.update_connections(peer_one, peer_two);
-
-                None
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
                 self.remove_connection(peer_one, peer_two);
-                None
             }
-            _ => None,
+            _ => {}
         }
     }
 }

@@ -20,67 +20,80 @@ use crate::{
     tui::{
         Tui, TuiEvent,
         components::{
-            manage_connections::ManageConnections, node_box::NodeBox, node_commands::NodeCommands,
-            node_list::NodeList, node_log::NodeLog,
+            manage_connections::ManageConnections,
+            node_box::NodeBox,
+            node_commands::NodeCommands,
+            node_info::NodeInfo,
+            node_list::NodeList,
+            node_log::NodeLog,
+            popup::{PopUpContent, Popup},
         },
     },
 };
 
-/// Determines which of the TUI components
-/// is in focus and will take priority in handling user input
+/// Determines which of the TUI components is in focus and will take priority in handling user input
 #[derive(Debug, PartialEq)]
 pub enum Focus {
     NodeLog,
     NodeList,
-    NodeCommands,
-    ManageConnections,
+    PopUp,
 }
 
-/// The action which is the result of handling user input
+/// The action to perform as the result of handling user input or from a network event
 #[derive(Debug, Clone)]
 pub enum Action {
+    /// Quit the Application
     Quit,
+
+    /// Start a new node in the network
     StartNode,
+
+    /// Add a newly started node to the TUI
     AddNode {
         peer_id: PeerId,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
     },
-    UpdateConnections {
-        peer_one: PeerId,
-        peer_two: PeerId,
-    },
-    StopNode {
-        peer_id: PeerId,
-    },
-    RemoveNode {
-        peer_id: PeerId,
-    },
-    DisplayLogs {
-        peer_id: PeerId,
-    },
-    DisplayNodeCommands {
-        peer_id: PeerId,
-    },
-    /// Connect peer_one to peer_two
-    /// peer_one being the initiator
-    ConnectTo {
-        peer_one: PeerId,
-        peer_two: PeerId,
-    },
-    /// Disconnect peer_one from peer_two
-    /// peer_one being the initiator
-    DisconnectFrom {
-        peer_one: PeerId,
-        peer_two: PeerId,
-    },
-    DisplayManageConnections {
-        peer_id: PeerId,
-    },
+
+    /// Update connections in the TUI when a connection between two nodes is established
+    UpdateConnections { peer_one: PeerId, peer_two: PeerId },
+
+    /// Stop a node from running
+    StopNode { peer_id: PeerId },
+
+    /// Remove a stopped node from the TUI
+    RemoveNode { peer_id: PeerId },
+
+    /// Display the logs for the selected node
+    DisplayLogs { peer_id: PeerId },
+
+    /// Display the node commands popup for the selected node
+    DisplayNodeCommands { peer_id: PeerId },
+
+    /// Display the node info popup for the selected node
+    DisplayInfo { peer_id: PeerId },
+
+    /// Connect peer_one to peer_two, peer_one being the initiator
+    ConnectTo { peer_one: PeerId, peer_two: PeerId },
+
+    /// Disconnect peer_one from peer_two, peer_one being the initiator
+    DisconnectFrom { peer_one: PeerId, peer_two: PeerId },
+
+    /// Display the manage connections popup for the selected node
+    DisplayManageConnections { peer_id: PeerId },
+
+    /// Close the node commands popup
     CloseNodeCommands,
+
+    /// Display the Popup with the given content
+    Popup {
+        content: PopUpContent,
+        peer_id: PeerId,
+    },
 }
 
 #[derive(Debug)]
 pub struct App {
+    /// Flag for stopping the TUI application
     quit: bool,
 
     /// CancellationToken used to signal other running tasks
@@ -101,12 +114,17 @@ pub struct App {
     /// HashMap containg the connections between the nodes
     node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
-    /// TUI components
+    /// Component for displaying the nodes on Canvas
     node_box: NodeBox,
+
+    /// Component for displaying the swarm events from a node
     node_log: NodeLog,
+
+    /// Component for displaying the list of active nodes
     node_list: NodeList,
-    node_commands: NodeCommands,
-    manage_connections: ManageConnections,
+
+    /// Component for displaying the list of active nodes
+    popup: Popup,
 
     /// Queue of Actions to be performed
     actions: VecDeque<Action>,
@@ -116,6 +134,8 @@ pub struct App {
 }
 
 impl App {
+    /// Builds a new App structure, returns the App, a CancellationToken, mpsc sender for
+    /// NetworkEvent, and a mpsc receiver for NetworkCommand
     pub fn new() -> (
         Self,
         CancellationToken,
@@ -136,8 +156,7 @@ impl App {
                 node_box: NodeBox::new(),
                 node_log: NodeLog::new(),
                 node_list: NodeList::new(),
-                node_commands: NodeCommands::new(),
-                manage_connections: ManageConnections::new(),
+                popup: Popup::new(),
                 actions: VecDeque::new(),
                 focus: Focus::NodeList,
                 node_logs: HashMap::new(),
@@ -149,7 +168,7 @@ impl App {
         )
     }
 
-    /// The main logic for the TUI
+    /// The main logic for the TUI application
     #[instrument(skip_all, name = "TUI")]
     pub async fn run(&mut self) -> Result<()> {
         // Create and enter TUI terminal environment
@@ -164,32 +183,30 @@ impl App {
         loop {
             tui.terminal.draw(|frame| self.render_frame(frame))?;
 
+            let mut new_actions = VecDeque::new();
+
             // Select the next network event from the node network or TUI event from the
             // user/interface
             tokio::select! {
                 Some(network_event) = self.network_event_rx.recv() => {
 
                     // Process the network event and get the action to preform
-                    let maybe_action = self.handle_network_event(network_event);
-
-                    debug!(target: "TUI", "Network event action being done: {:?}", maybe_action);
-
-                    if let Some(action) = maybe_action {
-                        self.update(action).await;
-                        self.process_actions().await;
-                    }
+                    self.handle_network_event(network_event, &mut new_actions);
 
                 }
                 Some(tui_event) = tui.next() => {
-                    let maybe_action = self.handle_tui_event(tui_event).await;
-
-                    trace!(target: "TUI", "TUI action being done: {:?}", maybe_action);
-
-                    if let Some(action) = maybe_action {
-                        self.update(action).await;
-                        self.process_actions().await;
-                    }
+                    self.handle_tui_event(tui_event, &mut new_actions).await;
                 },
+            }
+
+            // Add any action that has created from the event streams
+            self.actions.extend(new_actions);
+
+            trace!(target: "TUI", "current actions: {:?}", self.actions);
+
+            let mut current_actions = self.actions.clone();
+            if !self.actions.is_empty() {
+                self.process_actions(&mut current_actions).await;
             }
 
             if self.quit {
@@ -205,27 +222,45 @@ impl App {
         Ok(())
     }
 
+    fn focus_list_graph(&mut self) {
+        self.node_list.focus(true);
+        self.node_box.focus(true);
+
+        self.focus = Focus::NodeList;
+    }
+
+    fn unfocus_list_graph(&mut self) {
+        self.node_list.focus(false);
+        self.node_box.focus(false);
+    }
+
+    fn focus_logs(&mut self) {
+        self.node_log.focus(true);
+
+        self.focus = Focus::NodeLog;
+    }
+
+    fn unfocus_logs(&mut self) {
+        self.node_log.focus(false);
+    }
+
+    /// Switch focus between the two main TUI components
     pub fn switch_focus(&mut self) {
         match self.focus {
             Focus::NodeList => {
-                self.node_list.focus(false);
-                self.node_box.focus(false);
-                self.node_log.focus(true);
-                self.focus = Focus::NodeLog;
+                self.unfocus_list_graph();
+                self.focus_logs();
             }
             Focus::NodeLog => {
-                self.node_list.focus(true);
-                self.node_box.focus(true);
-                self.node_log.focus(false);
-                self.focus = Focus::NodeList;
+                self.focus_list_graph();
+                self.unfocus_logs();
             }
             _ => {}
         }
     }
 
-    /// Process an Action and update the state of the TUI application
-    /// accordingly
-    async fn update(&mut self, action: Action) {
+    /// Process an Action and update the state of the TUI application accordingly
+    async fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         debug!(target: "TUI App", "updating TUI using action: {:?}", action);
 
         match action {
@@ -242,22 +277,20 @@ impl App {
             Action::DisplayNodeCommands { peer_id } => {
                 debug!(target: "TUI App", "displaying node commands for {peer_id}");
 
-                self.focus = Focus::NodeCommands;
-                self.node_box.focus(false);
-                self.node_list.focus(false);
+                self.unfocus_list_graph();
             }
             Action::DisplayManageConnections { peer_id } => {
                 debug!(target: "TUI App", "displaying manage connections for {peer_id}");
 
-                self.focus = Focus::ManageConnections;
-                self.node_commands.focus(false);
-                self.node_box.focus(false);
-                self.node_list.focus(false);
+                self.unfocus_list_graph();
+            }
+            Action::DisplayInfo { peer_id } => {
+                debug!(target: "TUI App", "displaying node info for {peer_id}");
+
+                self.unfocus_list_graph();
             }
             Action::CloseNodeCommands => {
-                self.focus = Focus::NodeList;
-                self.node_box.focus(true);
-                self.node_list.focus(true);
+                self.focus_list_graph();
             }
             Action::ConnectTo { peer_one, peer_two } => {
                 self.command_tx
@@ -278,10 +311,7 @@ impl App {
                     .unwrap();
             }
             Action::RemoveNode { peer_id } => {
-                self.node_commands.focus(false);
-
-                self.node_box.focus(true);
-                self.node_list.focus(true);
+                self.focus_list_graph();
                 self.actions.push_back(Action::CloseNodeCommands);
             }
             Action::StartNode => {
@@ -290,45 +320,46 @@ impl App {
                     .await
                     .unwrap();
             }
+            Action::Popup { content, peer_id } => {
+                self.popup.set_content(content);
+                self.popup.set_node(peer_id);
+                self.enable_popup();
+            }
             _ => {}
         }
 
         // Pass the action through the different components adding the
         // returned action if needed
-        if let Some(action) = self.node_box.update(action.clone()) {
-            self.actions.push_back(action);
-        }
+        self.node_box.update(action.clone(), actions);
+        self.node_list.update(action.clone(), actions);
+        self.node_log.update(action.clone(), actions);
+        self.popup.update(action.clone(), actions);
+    }
 
-        if let Some(action) = self.node_list.update(action.clone()) {
-            self.actions.push_back(action);
-        }
-
-        if let Some(action) = self.node_commands.update(action.clone()) {
-            self.actions.push_back(action);
-        }
-
-        if let Some(action) = self.manage_connections.update(action.clone()) {
-            self.actions.push_back(action);
-        }
-
-        if let Some(action) = self.node_log.update(action) {
-            self.actions.push_back(action);
-        }
+    fn enable_popup(&mut self) {
+        self.focus = Focus::PopUp;
+        self.unfocus_list_graph();
     }
 
     /// Process the current actions in the queue
-    async fn process_actions(&mut self) {
+    async fn process_actions(&mut self, actions: &mut VecDeque<Action>) {
         while let Some(action) = self.actions.pop_front() {
-            self.update(action).await;
+            self.update(action, actions).await;
         }
+
+        self.actions = VecDeque::new();
     }
 
     /// Process a TUI event and output an Action
-    async fn handle_tui_event(&mut self, event: TuiEvent) -> Option<Action> {
+    async fn handle_tui_event(
+        &mut self,
+        event: TuiEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Option<Action> {
         match event {
             TuiEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 let _ = self
-                    .handle_key_event(key_event)
+                    .handle_key_event(key_event, actions)
                     .await
                     .wrap_err_with(|| format!("handling key event failed: {key_event:#?}"));
             }
@@ -338,13 +369,16 @@ impl App {
         match self.focus {
             Focus::NodeList => None,
             Focus::NodeLog => None,
-            Focus::NodeCommands => None,
-            Focus::ManageConnections => None,
+            _ => None,
         }
     }
 
     /// Process a network event from the node network and output an Action
-    fn handle_network_event(&mut self, network_event: NetworkEvent) -> Option<Action> {
+    fn handle_network_event(
+        &mut self,
+        network_event: NetworkEvent,
+        actions: &mut VecDeque<Action>,
+    ) {
         match network_event {
             NetworkEvent::NodeRunning {
                 peer_id,
@@ -354,28 +388,32 @@ impl App {
                 debug!(target: "TUI", "network event recieved: node running");
                 self.node_logs.insert(peer_id, message_history);
 
-                Some(Action::AddNode {
+                actions.push_back(Action::AddNode {
                     peer_id: peer_id,
                     node_connections,
-                })
+                });
             }
             NetworkEvent::NodeStopped { peer_id } => {
                 debug!(target: "TUI", "network event recieved: node stopped");
 
                 self.node_logs.remove_entry(&peer_id);
 
-                Some(Action::RemoveNode { peer_id })
+                actions.push_back(Action::RemoveNode { peer_id });
             }
             NetworkEvent::NodesConnected { peer_one, peer_two } => {
                 debug!(target: "TUI", "updating connections between {} and {}", peer_one, peer_two);
 
-                Some(Action::UpdateConnections { peer_one, peer_two })
+                actions.push_back(Action::UpdateConnections { peer_one, peer_two });
             }
         }
     }
 
     /// Process key input from the TUI
-    async fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
+    async fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        actions: &mut VecDeque<Action>,
+    ) -> Result<()> {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
             KeyCode::Tab => self.switch_focus(),
@@ -384,34 +422,11 @@ impl App {
 
         match self.focus {
             Focus::NodeList => {
-                if let Some(action) = self.node_box.handle_key_event(key_event) {
-                    debug!(target: "TUI", "new action recieved from node box key event: {:?}", action);
-                    self.update(action).await;
-                }
-
-                if let Some(action) = self.node_list.handle_key_event(key_event) {
-                    debug!(target: "TUI", "new action recieved from node list key event: {:?}", action);
-                    self.update(action).await;
-                }
+                self.node_box.handle_key_event(key_event, actions);
+                self.node_list.handle_key_event(key_event, actions)?
             }
-            Focus::NodeLog => {
-                if let Some(action) = self.node_log.handle_key_event(key_event) {
-                    debug!(target: "TUI", "new action recieved from node log key event: {:?}", action);
-                    self.update(action).await;
-                }
-            }
-            Focus::NodeCommands => {
-                if let Some(action) = self.node_commands.handle_key_event(key_event) {
-                    debug!(target: "TUI", "new action recieved from node commands key event: {:?}", action);
-                    self.update(action).await;
-                }
-            }
-            Focus::ManageConnections => {
-                if let Some(action) = self.manage_connections.handle_key_event(key_event) {
-                    debug!(target: "TUI", "new action recieved from manage connections key event: {:?}", action);
-                    self.update(action).await;
-                }
-            }
+            Focus::NodeLog => self.node_log.handle_key_event(key_event, actions)?,
+            Focus::PopUp => self.popup.handle_key_event(key_event, actions).await?,
         }
 
         Ok(())
@@ -432,8 +447,8 @@ impl App {
         self.node_list.render(frame, top_chunks[1]);
         self.node_log.render(frame, main_chunks[1]);
 
-        if self.focus == Focus::NodeCommands {
-            debug!(target: "TUI", "rendering node commands");
+        if self.focus == Focus::PopUp {
+            trace!(target: "TUI", "rendering popup with content: {:?}", self.popup.content);
 
             let rect = Rect {
                 x: frame.area().width / 4,
@@ -441,18 +456,29 @@ impl App {
                 width: frame.area().width / 2,
                 height: frame.area().height / 3,
             };
-            self.node_commands.render(frame, rect);
-        } else if self.focus == Focus::ManageConnections {
-            debug!(target: "TUI", "rendering manage connections");
-
-            let rect = Rect {
-                x: frame.area().width / 4,
-                y: frame.area().height / 3,
-                width: frame.area().width / 2,
-                height: frame.area().height / 3,
-            };
-            self.manage_connections.render(frame, rect);
+            self.popup.render(frame, rect);
         }
+        //} else if self.focus == Focus::ManageConnections {
+        //    debug!(target: "TUI", "rendering manage connections");
+
+        //    let rect = Rect {
+        //        x: frame.area().width / 4,
+        //        y: frame.area().height / 3,
+        //        width: frame.area().width / 2,
+        //        height: frame.area().height / 3,
+        //    };
+        //    self.manage_connections.render(frame, rect);
+        //} else if self.focus == Focus::NodeInfo {
+        //    debug!(target: "TUI", "rendering node info");
+
+        //    let rect = Rect {
+        //        x: frame.area().width / 4,
+        //        y: frame.area().height / 3,
+        //        width: frame.area().width / 2,
+        //        height: frame.area().height / 3,
+        //    };
+        //    self.node_info.render(frame, rect);
+        //}
     }
 
     pub fn exit(&mut self) {

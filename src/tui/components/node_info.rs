@@ -1,9 +1,9 @@
+use color_eyre::eyre::Result;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, RwLock},
 };
 
-use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
@@ -16,10 +16,10 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::tui::app::Action;
+use crate::tui::{app::Action, components::popup::PopUpContent};
 
 #[derive(Debug)]
-pub struct NodeCommands {
+pub struct NodeInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
@@ -33,22 +33,22 @@ pub struct NodeCommands {
     focus: bool,
 }
 
-impl NodeCommands {
+impl NodeInfo {
     pub fn new() -> Self {
         Self {
             node: None,
-            len: 3,
+            len: 2,
             list_state: ListState::default().with_selected(Some(0)),
             focus: false,
         }
     }
 
-    pub fn focus(&mut self, focus: bool) {
-        self.focus = focus;
-    }
-
     pub fn set_node(&mut self, node: PeerId) {
         self.node = Some(node);
+    }
+
+    pub fn focus(&mut self, focus: bool) {
+        self.focus = focus;
     }
 
     pub fn select_next(&mut self) {
@@ -86,7 +86,7 @@ impl NodeCommands {
             KeyCode::Enter => {
                 let selection = self.clamp(self.list_state.selected().unwrap_or(0));
 
-                debug!(target: "node_commands", "node commands option {} selected", selection);
+                debug!(target: "node_info", "node commands option {} selected", selection);
 
                 match selection {
                     0 => {
@@ -95,11 +95,6 @@ impl NodeCommands {
                         });
                     }
                     1 => {
-                        actions.push_back(Action::DisplayInfo {
-                            peer_id: self.node.unwrap(),
-                        });
-                    }
-                    2 => {
                         actions.push_back(Action::StopNode {
                             peer_id: self.node.unwrap(),
                         });
@@ -107,8 +102,12 @@ impl NodeCommands {
                     _ => {}
                 }
             }
+            // We return back to the node commands when pressing esc (exit)
             KeyCode::Esc => {
-                actions.push_back(Action::CloseNodeCommands);
+                actions.push_back(Action::Popup {
+                    content: PopUpContent::NodeCommands,
+                    peer_id: self.node.unwrap(),
+                });
             }
             _ => {}
         }
@@ -127,7 +126,7 @@ impl NodeCommands {
         .style(Style::new().fg(Color::White));
 
         let block = Block::new()
-            .title("Node Commands")
+            .title("Node Info")
             .title_alignment(Alignment::Center)
             .title_bottom(footer_text)
             .borders(Borders::ALL)
@@ -138,7 +137,7 @@ impl NodeCommands {
             return;
         }
 
-        let list_items = vec!["Manage Connections", "Node Info", "Remove Node (stop node)"];
+        let list_items = vec!["Identify Info", "Kademlia Info"];
 
         let list = List::new(list_items)
             .highlight_style(Style::new().reversed())
@@ -150,7 +149,7 @@ impl NodeCommands {
 
     pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
-            Action::DisplayNodeCommands { peer_id } => {
+            Action::DisplayInfo { peer_id } => {
                 self.node = Some(peer_id);
             }
             Action::CloseNodeCommands => {}

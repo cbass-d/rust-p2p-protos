@@ -1,9 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 
-use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
@@ -19,7 +18,7 @@ use tracing::debug;
 use crate::tui::app::Action;
 
 #[derive(Debug)]
-pub struct NodeCommands {
+pub struct IdentifyInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
@@ -33,11 +32,11 @@ pub struct NodeCommands {
     focus: bool,
 }
 
-impl NodeCommands {
+impl IdentifyInfo {
     pub fn new() -> Self {
         Self {
             node: None,
-            len: 3,
+            len: 2,
             list_state: ListState::default().with_selected(Some(0)),
             focus: false,
         }
@@ -45,10 +44,6 @@ impl NodeCommands {
 
     pub fn focus(&mut self, focus: bool) {
         self.focus = focus;
-    }
-
-    pub fn set_node(&mut self, node: PeerId) {
-        self.node = Some(node);
     }
 
     pub fn select_next(&mut self) {
@@ -71,17 +66,15 @@ impl NodeCommands {
         }
     }
 
-    pub fn handle_key_event(
-        &mut self,
-        key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
-    ) -> Result<()> {
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<Action> {
         match key_event.code {
             KeyCode::Up => {
                 self.select_previous();
+                None
             }
             KeyCode::Down => {
                 self.select_next();
+                None
             }
             KeyCode::Enter => {
                 let selection = self.clamp(self.list_state.selected().unwrap_or(0));
@@ -89,31 +82,18 @@ impl NodeCommands {
                 debug!(target: "node_commands", "node commands option {} selected", selection);
 
                 match selection {
-                    0 => {
-                        actions.push_back(Action::DisplayManageConnections {
-                            peer_id: self.node.unwrap(),
-                        });
-                    }
-                    1 => {
-                        actions.push_back(Action::DisplayInfo {
-                            peer_id: self.node.unwrap(),
-                        });
-                    }
-                    2 => {
-                        actions.push_back(Action::StopNode {
-                            peer_id: self.node.unwrap(),
-                        });
-                    }
-                    _ => {}
+                    0 => Some(Action::DisplayManageConnections {
+                        peer_id: self.node.unwrap(),
+                    }),
+                    1 => Some(Action::StopNode {
+                        peer_id: self.node.unwrap(),
+                    }),
+                    _ => None,
                 }
             }
-            KeyCode::Esc => {
-                actions.push_back(Action::CloseNodeCommands);
-            }
-            _ => {}
+            KeyCode::Esc => Some(Action::CloseNodeCommands),
+            _ => None,
         }
-
-        Ok(())
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -127,7 +107,7 @@ impl NodeCommands {
         .style(Style::new().fg(Color::White));
 
         let block = Block::new()
-            .title("Node Commands")
+            .title("Identify Commands")
             .title_alignment(Alignment::Center)
             .title_bottom(footer_text)
             .borders(Borders::ALL)
@@ -138,7 +118,7 @@ impl NodeCommands {
             return;
         }
 
-        let list_items = vec!["Manage Connections", "Node Info", "Remove Node (stop node)"];
+        let list_items = vec!["", "Remove Node (stop node)"];
 
         let list = List::new(list_items)
             .highlight_style(Style::new().reversed())
@@ -148,13 +128,14 @@ impl NodeCommands {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::DisplayNodeCommands { peer_id } => {
                 self.node = Some(peer_id);
+                None
             }
-            Action::CloseNodeCommands => {}
-            _ => {}
+            Action::CloseNodeCommands => None,
+            _ => None,
         }
     }
 }

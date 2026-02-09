@@ -161,6 +161,11 @@ impl NodeNetwork {
                 }
             }
             NetworkCommand::StartNode => {
+                // We limit the amount of nodes to 10
+                if self.nodes.len() >= 10 {
+                    return node_task_set;
+                }
+
                 // Store the nodes Multiaddress for connecting the nodes in the future
                 let mut node = self.add_node().unwrap();
 
