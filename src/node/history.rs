@@ -1,16 +1,16 @@
 use libp2p::{
     Multiaddr, PeerId,
-    core::{ConnectedPoint, connection, transport::ListenerId},
+    core::{ConnectedPoint, transport::ListenerId},
     identify::Event as IdentifyEvent,
     kad::Event as KadEvent,
 };
 use ratatui::{
-    layout::Alignment,
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
 };
-use tracing::{debug, info};
+use tracing::debug;
 
+/// Wrappers for libp2p Swarm events for easier handling and formatting
 #[derive(Debug, Clone)]
 pub enum SwarmEventInfo {
     ConnectionEstablished {
@@ -38,6 +38,7 @@ pub enum SwarmEventInfo {
     },
 }
 
+/// Container for the swarm events a node has seen separated by protocol. Includes a timestamp
 #[derive(Default, Debug, Clone)]
 pub struct MessageHistory {
     pub identify: Vec<(String, String)>,
@@ -46,12 +47,19 @@ pub struct MessageHistory {
 }
 
 impl MessageHistory {
+    /// Adds a identify event, takes the event as String and the timestamp as f32
     pub fn add_identify_event(&mut self, event: String, since_start: f32) {
         self.identify.push((event, format!("{:.5}", since_start)));
     }
 
+    /// Adds a kademlia event, takes the event as String and the timestamp as f32
     pub fn add_kademlia_event(&mut self, event: String, since_start: f32) {
         self.kademlia.push((event, format!("{:.5}", since_start)));
+    }
+
+    /// Adds a swarm event, takes the event as String and the timestamp as f32
+    pub fn add_swarm_event(&mut self, event: SwarmEventInfo, since_start: f32) {
+        self.swarm.push((event, format!("{:.5}", since_start)));
     }
 
     pub fn identify_messages(&self) -> Vec<String> {
@@ -134,7 +142,7 @@ impl MessageHistory {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
-                    Span::raw(format_swarm_event(m)),
+                    Span::raw(format_swarm_event_to_string(m)),
                 ]);
 
                 line
@@ -142,6 +150,7 @@ impl MessageHistory {
             .collect()
     }
 
+    /// Returns kademlia messages as strings
     pub fn kad_messages(&self) -> Vec<String> {
         self.kademlia
             .iter()
@@ -149,6 +158,7 @@ impl MessageHistory {
             .collect()
     }
 
+    /// Returns swarm messages as strings
     pub fn swarm_messages(&self) -> Vec<String> {
         self.swarm
             .iter()
@@ -156,6 +166,7 @@ impl MessageHistory {
             .collect()
     }
 
+    /// Returns all messages as pretty and formatted ratatui Lines
     pub fn all_messages_formmatted(&self) -> Vec<Line<'_>> {
         let mut messages = vec![];
         messages.append(&mut self.identify_messages_formatted());
@@ -165,6 +176,7 @@ impl MessageHistory {
         messages
     }
 
+    /// Returns all messages as strings
     pub fn all_messages(&self) -> Vec<String> {
         let mut messages = vec![];
         messages.append(&mut self.identify_messages());
@@ -174,6 +186,7 @@ impl MessageHistory {
         messages
     }
 
+    /// Prints the identify messages to stdout
     pub fn display_identify_messages(&self) {
         for message in &self.identify {
             let (event, time) = message;
@@ -182,6 +195,7 @@ impl MessageHistory {
         }
     }
 
+    /// Prints the kademlia messages to stdout
     pub fn display_kademlia_messages(&self) {
         for message in &self.kademlia {
             let (event, time) = message;
@@ -190,6 +204,7 @@ impl MessageHistory {
         }
     }
 
+    /// Prints the swarm messages to stdout
     pub fn display_swarm_messages(&self) {
         for message in &self.swarm {
             let (event, time) = message;
@@ -197,12 +212,9 @@ impl MessageHistory {
             println!("{}s : {:?}", time, event);
         }
     }
-
-    pub fn add_swarm_event(&mut self, event: SwarmEventInfo, since_start: f32) {
-        self.swarm.push((event, format!("{:.5}", since_start)));
-    }
 }
 
+/// Formats the identify event to a readable string
 pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
     match event {
         IdentifyEvent::Sent {
@@ -247,6 +259,7 @@ pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
     }
 }
 
+/// Formats the kademlia event to a readable string
 pub fn kad_event_to_string(event: &KadEvent) -> String {
     match event {
         KadEvent::ModeChanged { new_mode } => {
@@ -294,7 +307,8 @@ pub fn kad_event_to_string(event: &KadEvent) -> String {
     }
 }
 
-pub fn format_swarm_event(event: &SwarmEventInfo) -> String {
+/// Formats the swarm event to a readable string
+pub fn format_swarm_event_to_string(event: &SwarmEventInfo) -> String {
     match event {
         SwarmEventInfo::Dialing { peer_id } => {
             format!("DIALING Now dialing peer {}", peer_id.unwrap())

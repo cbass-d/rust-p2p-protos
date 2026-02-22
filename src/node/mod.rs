@@ -15,7 +15,7 @@ use libp2p::{
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     identity,
-    kad::{Behaviour as Kademlia, store::MemoryStore},
+    kad::{Addresses, Behaviour as Kademlia, KBucketKey, KBucketRef, store::MemoryStore},
     multiaddr::Protocol,
     noise,
     swarm::{self, SwarmEvent},
@@ -37,7 +37,7 @@ use crate::{
     node::{
         behaviour::{NodeBehaviour, NodeNetworkEvent},
         history::{MessageHistory, SwarmEventInfo, identify_event_to_string, kad_event_to_string},
-        info::IdentifyInfo,
+        info::{IdentifyInfo, KBucketInfo, KademliaInfo},
         kad_handler::KadQueries,
     },
 };
@@ -46,12 +46,14 @@ const IPFS_KAD_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const NODE_NETWORK_AGENT: &str = "node-network/0.1";
 
+/// The result after a node has stopped running
 #[derive(Debug, Clone)]
 pub enum NodeResult {
     Success,
     Error(String),
 }
 
+/// The number of messages/swarm events the node has sent and received
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NodeStats {
     pub recvd_count: u64,
@@ -102,6 +104,9 @@ pub struct Node {
 
     /// Struct to hold local identify info (info that is pushed to other peers)
     identify_info: IdentifyInfo,
+
+    /// Struct to hold local kademlia info
+    kad_info: KademliaInfo,
 }
 
 impl Node {
@@ -160,6 +165,8 @@ impl Node {
             listen_address.clone(),
         );
 
+        let kad_info = KademliaInfo::new(swarm.behaviour().kad.mode(), false);
+
         let node = Node {
             peer_id,
             from_network: rx,
@@ -171,28 +178,12 @@ impl Node {
             bootstrapped: false,
             swarm,
             identify_info,
+            kad_info,
             listen_address: listen_address.clone(),
         };
 
         Ok((node, tx, listen_address))
     }
-
-    pub fn logs_clone(&self) -> Arc<RwLock<(MessageHistory, NodeStats)>> {
-        self.logs.clone()
-    }
-
-    pub fn add_peer(&mut self, peer: Multiaddr) {
-        self.known_peers.push(peer);
-    }
-
-    // pub async fn send_to(&mut self, destination: Ipv4Addr, message: &[u8]) -> Result<()> {
-    //     let message = Message::new(self.ip_address, destination, message);
-
-    //     self.to_network.send(message).await?;
-    //     self.stats.lock().unwrap().sent_count += 1;
-
-    //     Ok(())
-    // }
 
     /// Main run loop of for the node
     #[instrument(skip_all, fields(id = %self.peer_id), name = "run node")]
@@ -351,6 +342,7 @@ impl Node {
         Ok(NodeResult::Success)
     }
 
+    /// Handles an incoming node command from the node network, returns the NodeResponse if any
     fn handle_node_command(&mut self, command: NodeCommand) -> Option<NodeResponse> {
         match command {
             NodeCommand::ConnectTo { peer } => {
@@ -382,6 +374,12 @@ impl Node {
 
                 Some(NodeResponse::IdentifyInfo { info })
             }
+            NodeCommand::GetKademliaInfo => {
+                self.update_kademlia_info();
+                let info = self.kad_info.clone();
+
+                Some(NodeResponse::KademliaInfo { info })
+            }
             NodeCommand::Stop => {
                 debug!(target: "node", "stop command received");
 
@@ -392,32 +390,59 @@ impl Node {
         }
     }
 
+    /// Returns the identify messages as strings
     pub fn identify_messages(&self) -> Vec<String> {
         let messages = &self.logs.read().unwrap().0;
 
         messages.identify_messages()
     }
 
+    /// Returns the kademlia messages as strings
     pub fn kad_messages(&self) -> Vec<String> {
         let messages = &self.logs.read().unwrap().0;
 
         messages.kad_messages()
     }
 
+    /// Returns the swarm messages as strings
     pub fn swarm_messages(&self) -> Vec<String> {
         let messages = &self.logs.read().unwrap().0;
 
         messages.swarm_messages()
     }
 
+    /// Returns the all messages as strings
     pub fn all_messages(&self) -> Vec<String> {
         let messages = &self.logs.read().unwrap().0;
 
         messages.all_messages()
     }
 
-    pub fn get_stats(&self) -> NodeStats {
-        self.logs.read().unwrap().1
+    fn update_kademlia_info(&mut self) {
+        // Get the closest peers
+        let peer_key = self.peer_id.into();
+        let closest = self
+            .swarm
+            .behaviour_mut()
+            .kad
+            .get_closest_local_peers(&peer_key);
+
+        let closest: Vec<PeerId> = closest.map(|k| k.into_preimage()).collect();
+        debug!(target: "node", "the closet peers: {:?}", closest);
+
+        self.kad_info.set_closest_peers(closest);
+
+        // Get the non-empty kbuckets
+        let buckets = self.swarm.behaviour_mut().kad.kbuckets();
+        let mut bucket_info: Vec<KBucketInfo> = vec![];
+        buckets.for_each(|kb| {
+            bucket_info.push(KBucketInfo {
+                range: (kb.range().0.0, kb.range().1.0),
+                num_entries: kb.num_entries(),
+            });
+        });
+
+        self.kad_info.set_bucket_info(bucket_info);
     }
 }
 

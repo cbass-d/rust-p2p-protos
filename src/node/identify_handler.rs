@@ -4,6 +4,7 @@ use tracing::{debug, info, warn};
 
 use crate::node::{NODE_NETWORK_AGENT, Node};
 
+/// Handle an incoming identify event
 pub fn handle_event(node: &mut Node, event: identify::Event) -> Result<()> {
     match event {
         Event::Received { peer_id, info, .. } => {

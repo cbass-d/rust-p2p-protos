@@ -6,6 +6,7 @@ use libp2p::{
     swarm::NetworkBehaviour,
 };
 
+/// Node behaviour for our peers. Currently has identify and kademlia. (more in the future)
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "NodeNetworkEvent")]
 pub struct NodeBehaviour {
@@ -13,6 +14,7 @@ pub struct NodeBehaviour {
     pub identify: identify::Behaviour,
 }
 
+/// libp2p swarm events for our node behvaiour
 #[derive(Debug)]
 pub enum NodeNetworkEvent {
     Identify(identify::Event),

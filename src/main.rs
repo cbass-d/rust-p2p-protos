@@ -4,7 +4,6 @@ mod network;
 mod node;
 mod tests;
 mod tui;
-mod utils;
 
 use clap::Parser;
 use color_eyre::eyre::Result;
@@ -16,8 +15,7 @@ use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
 
 use crate::{cli::CliArgs, tui::app::App};
 
-// Initialize tracing for application
-// Use a rolling log file that refreshes daily
+/// Initialize tracing for application, uses a rolling log file that refreshes daily
 fn init_tracing() -> Result<WorkerGuard> {
     // Setup rolling logging to file
     let file_appender = tracing_appender::rolling::daily("logs", "p2p.log");

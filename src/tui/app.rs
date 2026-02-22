@@ -307,6 +307,15 @@ impl App {
 
                 self.unfocus_list_graph();
             }
+            Action::DisplayKademliaInfo { peer_id } => {
+                debug!(target: "TUI App", "displaying kademlia info for node {peer_id}");
+                self.command_tx
+                    .send(NetworkCommand::GetKademliaInfo { peer_id })
+                    .await
+                    .unwrap();
+
+                self.unfocus_list_graph();
+            }
             Action::CloseNodeCommands => {
                 self.focus_list_graph();
             }
@@ -425,6 +434,9 @@ impl App {
             }
             NetworkEvent::IdentifyInfo { info } => {
                 self.popup.identify_info.set_info(info);
+            }
+            NetworkEvent::KademliaInfo { info } => {
+                self.popup.kademlia_info.set_info(info);
             }
         }
     }

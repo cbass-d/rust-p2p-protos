@@ -9,17 +9,20 @@ use indexmap::IndexSet;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListState, Padding, Paragraph, Widget, Wrap},
+    layout::{Alignment, Rect},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListState, Padding, Paragraph, Widget},
 };
 use tracing::debug;
 
 use crate::tui::{app::Action, components::popup::PopUpContent};
 
+/// Component for managing the connections for a node in the network. Connections can be
+/// established or deleted.
 #[derive(Debug)]
 pub struct ManageConnections {
+    /// The node for which we are performing commands for
     node: Option<PeerId>,
 
     /// A IndexSet (a hashset that be accessed using []) of the actively
@@ -34,21 +37,32 @@ pub struct ManageConnections {
 
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
+
+    /// If the component is currenlty in focus in the TUI
+    focus: bool,
 }
 
 impl ManageConnections {
+    /// Build a fresh ManageConnections component
     pub fn new() -> Self {
         Self {
             node: None,
             active_nodes: IndexSet::new(),
             node_connections: HashMap::default(),
             len: 0,
+            focus: false,
             list_state: ListState::default(),
         }
     }
 
+    /// Set the node for the component context
     pub fn set_node(&mut self, node: PeerId) {
         self.node = Some(node);
+    }
+
+    /// Set the focus field for the component
+    pub fn focus(&mut self, focus: bool) {
+        self.focus = focus;
     }
 
     pub fn select_next(&mut self) {
@@ -71,6 +85,7 @@ impl ManageConnections {
         }
     }
 
+    /// Handle a key event comming from the TUI
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,

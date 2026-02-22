@@ -1,26 +1,22 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, RwLock},
-};
+use std::collections::VecDeque;
 
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
-use indexmap::IndexSet;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    layout::{Alignment, Rect},
+    style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListState, Padding, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Clear, ListState, Padding, Paragraph, Widget, Wrap},
 };
-use tracing::debug;
 
 use crate::{
     node::info::IdentifyInfo as NodeIdentifyInfo,
     tui::{app::Action, components::popup::PopUpContent},
 };
 
+/// Component for displaying info related to the identify protocol
 #[derive(Debug)]
 pub struct IdentifyInfo {
     /// The node for which we are performing commands for
@@ -39,6 +35,7 @@ pub struct IdentifyInfo {
 }
 
 impl IdentifyInfo {
+    /// Build a fresh IdentifyInfo component
     pub fn new() -> Self {
         Self {
             node: None,
@@ -49,56 +46,28 @@ impl IdentifyInfo {
         }
     }
 
+    /// Set the node for the component context
     pub fn set_node(&mut self, node: PeerId) {
         self.node = Some(node);
     }
 
+    /// Set the info for the component context
     pub fn set_info(&mut self, info: NodeIdentifyInfo) {
         self.info = Some(info);
     }
 
+    /// Set the focus field for the component
     pub fn focus(&mut self, focus: bool) {
         self.focus = focus;
     }
 
-    pub fn select_next(&mut self) {
-        self.list_state.select_next();
-    }
-
-    pub fn select_previous(&mut self) {
-        self.list_state.select_previous();
-    }
-
-    /// Moving up and down the listcan move past the bounds of the list,
-    /// we must make sure it does not
-    pub fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len {
-            self.len - 1
-        } else if idx < 0 {
-            0
-        } else {
-            idx
-        }
-    }
-
+    /// Handle a key event comming from the TUI
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
         match key_event.code {
-            KeyCode::Up => {
-                self.select_previous();
-            }
-            KeyCode::Down => {
-                self.select_next();
-            }
-            KeyCode::Enter => {
-                let selection = self.clamp(self.list_state.selected().unwrap_or(0));
-
-                debug!(target: "node_commands", "node commands option {} selected", selection);
-            }
-            // We return back to the node commands when pressing esc (exit)
             KeyCode::Esc => {
                 actions.push_back(Action::Popup {
                     content: PopUpContent::NodeInfo,
@@ -111,6 +80,7 @@ impl IdentifyInfo {
         Ok(())
     }
 
+    /// Render the IdentifyInfo component with the current context
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         Clear.render(area, frame.buffer_mut());
 
@@ -133,6 +103,7 @@ impl IdentifyInfo {
             return;
         }
 
+        // Redner the info is present as a Paragraph
         if self.info.is_none() {
             Paragraph::new("--- No info to display ---")
                 .block(block)
@@ -141,10 +112,14 @@ impl IdentifyInfo {
         } else {
             let info = self.info.clone().unwrap();
             let lines = Text::from(vec![
-                Line::from(format!("{:?}", info.public_key)),
-                Line::from(format!("Protocol Version: {}", info.protocol_version)),
-                Line::from(format!("Agent String: {}", info.agent_string)),
-                Line::from(format!("Listen Address: {}", info.listen_addr.to_string())),
+                Line::raw("Peer Id:").style(Style::new().underlined()),
+                Line::from(format!("    {}", info.public_key.to_peer_id())),
+                Line::raw("Protocol Version:").style(Style::new().underlined().bold()),
+                Line::from(format!("    {}", info.protocol_version)),
+                Line::raw("Agent String:").style(Style::new().underlined()),
+                Line::from(format!("    {}", info.agent_string)),
+                Line::raw("Listen Address:").style(Style::new().underlined()),
+                Line::from(format!("    {}", info.listen_addr.to_string())),
             ]);
             Paragraph::new(lines)
                 .block(block)
@@ -153,6 +128,7 @@ impl IdentifyInfo {
         }
     }
 
+    /// Update IdentifyInfo with the provided Action component as needed
     pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayNodeCommands { peer_id } => {

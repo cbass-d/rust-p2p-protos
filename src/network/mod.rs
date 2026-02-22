@@ -26,18 +26,22 @@ pub struct NodeNetwork {
     /// Mapping from peer id to nodes libp2p multi-address
     addresses: HashMap<PeerId, Multiaddr>,
 
+    /// mpsc sender for Network Events
     network_event_tx: mpsc::Sender<NetworkEvent>,
 
+    /// CancellationToken that shared by all nodes as well
     cancellation_token: CancellationToken,
 
+    /// The Instant that the network started, used to stamp swarm events
     network_start: Instant,
 
+    /// The number of packets the network has seen in total
     packets: u64,
 }
 
 impl NodeNetwork {
-    // Returns a new network with the specified network range set
-    // by the start Ipv4 address and end Ipv4 address
+    /// Builds a new node network with the provided mpsc sender, cancellation and with the provided
+    /// number of starting nodes
     pub fn new(
         number_of_nodes: u8,
         network_event_tx: mpsc::Sender<NetworkEvent>,
@@ -55,8 +59,8 @@ impl NodeNetwork {
         }
     }
 
-    // Builds and adds a new node into the network.
-    // Returns a Node or an Err when the their is no more
+    /// Builds and adds a new node into the network. Returns a Node or an Err when building the
+    /// new node fails
     pub fn add_node(&mut self) -> Result<Node> {
         let (node, tx, listen_adrress) = Node::new()?;
         self.nodes.insert(node.peer_id, tx);
@@ -65,12 +69,7 @@ impl NodeNetwork {
         Ok(node)
     }
 
-    fn connect_two_nodes(&mut self, mut node_one: Node, node_two: &mut Node) -> Node {
-        node_one.add_peer(node_two.listen_address.clone());
-        node_one
-    }
-
-    // Main run loop of for the node
+    /// Main run loop of for the Node Network
     #[instrument(skip_all, name = "run network")]
     pub async fn run(
         &mut self,
@@ -126,6 +125,8 @@ impl NodeNetwork {
         Ok(())
     }
 
+    /// Handle a network command received from the TUI. Takes in the network command and
+    /// the task set of the running nodes. We rturn the task set with updates, if any
     async fn handle_network_command(
         &mut self,
         command: NetworkCommand,
@@ -177,6 +178,31 @@ impl NodeNetwork {
                                 .await
                                 .unwrap();
                         }
+                        _ => {}
+                    }
+                }
+            }
+            NetworkCommand::GetKademliaInfo { peer_id } => {
+                if let Some(node_channel) = self.nodes.get(&peer_id) {
+                    let (tx, reply_rx) = oneshot::channel();
+
+                    node_channel
+                        .send((NodeCommand::GetKademliaInfo, tx))
+                        .await
+                        .unwrap();
+
+                    let response = reply_rx.await.unwrap();
+
+                    debug!(target: "node_network", "received kademlia info: {:?}", response);
+
+                    match response {
+                        NodeResponse::KademliaInfo { info } => {
+                            self.network_event_tx
+                                .send(NetworkEvent::KademliaInfo { info })
+                                .await
+                                .unwrap();
+                        }
+                        _ => {}
                     }
                 }
             }

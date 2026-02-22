@@ -7,7 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::node::{NODE_NETWORK_AGENT, Node};
 
-// Id's of important kad queries
+/// Keeping track of important kademlia queries
 #[derive(Default, Debug)]
 pub struct KadQueries {
     pub bootsrap_id: Option<QueryId>,
@@ -15,6 +15,7 @@ pub struct KadQueries {
     pub get_providers_id: Option<QueryId>,
 }
 
+/// Handle an incoming kademlia event
 pub fn handle_event(node: &mut Node, event: kad::Event) -> Result<()> {
     match event {
         kad::Event::InboundRequest { request } => {
@@ -38,6 +39,8 @@ pub fn handle_event(node: &mut Node, event: kad::Event) -> Result<()> {
         }
         kad::Event::ModeChanged { new_mode } => {
             info!(target: "kademlia_events", "node mode changed to {new_mode}");
+
+            node.kad_info.set_mode(new_mode);
         }
         other => {
             debug!("some other kad event: {:?}", other);
@@ -46,6 +49,7 @@ pub fn handle_event(node: &mut Node, event: kad::Event) -> Result<()> {
     Ok(())
 }
 
+/// Handle an inbound kadmelia request
 fn on_inbound_req(_node: &mut Node, request: InboundRequest) {
     match request {
         InboundRequest::FindNode { .. } => {}
@@ -56,6 +60,7 @@ fn on_inbound_req(_node: &mut Node, request: InboundRequest) {
     }
 }
 
+/// Handle result of kademlia query
 fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: ProgressStep) {
     match result {
         QueryResult::Bootstrap(Ok(res)) => {
@@ -64,6 +69,7 @@ fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: Prog
                     if step.last {
                         node.kad_queries.bootsrap_id = None;
                         node.bootstrapped = true;
+                        node.kad_info.set_bootstrapped(true);
 
                         info!(target: "kademlia_events", "kademlia bootstrapped");
 
