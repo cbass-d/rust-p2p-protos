@@ -43,14 +43,13 @@ impl NodeNetwork {
     /// Builds a new node network with the provided mpsc sender, cancellation and with the provided
     /// number of starting nodes
     pub fn new(
-        number_of_nodes: u8,
         network_event_tx: mpsc::Sender<NetworkEvent>,
         cancellation_token: CancellationToken,
     ) -> Self {
-        debug!(target: "node_network", "node network built with {}", number_of_nodes);
+        debug!(target: "node_network", "node network built");
 
         NodeNetwork {
-            nodes: HashMap::with_capacity(number_of_nodes as usize),
+            nodes: HashMap::new(),
             addresses: HashMap::new(),
             network_event_tx,
             cancellation_token,
@@ -76,7 +75,7 @@ impl NodeNetwork {
         number_of_nodes: u8,
         mut network_command_rx: mpsc::Receiver<NetworkCommand>,
     ) -> Result<()> {
-        info!(target: "node_network", "node network running with {} nodes", number_of_nodes);
+        info!(target: "node_network", "node network running with {} nodes", self.nodes.len());
 
         self.network_start = Instant::now();
 
@@ -156,6 +155,23 @@ impl NodeNetwork {
                         .send((NodeCommand::DisconnectFrom { peer: peer_two }, tx))
                         .await
                         .unwrap();
+
+                    let response = reply_rx.await.unwrap();
+
+                    debug!(target: "node_network", "nodes disconnected");
+
+                    match response {
+                        NodeResponse::Disconnected { peer } => {
+                            self.network_event_tx
+                                .send(NetworkEvent::NodesDisconnected {
+                                    peer_one,
+                                    peer_two: peer,
+                                })
+                                .await
+                                .unwrap();
+                        }
+                        _ => {}
+                    }
                 }
             }
             NetworkCommand::GetIdentifyInfo { peer_id } => {
@@ -243,63 +259,170 @@ impl NodeNetwork {
 
 #[cfg(test)]
 mod tests {
-    //#[test]
-    //pub fn test_adding_new_nodes() {
-    //    let mut network = NodeNetwork::new(5);
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
 
-    //    let mut nodes = vec![];
-    //    for _ in 0..5 {
-    //        nodes.push(network.add_node().unwrap());
-    //    }
+    use crate::{
+        messages::{NetworkCommand, NetworkEvent},
+        network::NodeNetwork,
+    };
 
-    //    assert_eq!(nodes.len(), 5);
-    //}
+    #[test]
+    fn test_create_empty_network() {
+        let (network_event_tx, _) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let node_network = NodeNetwork::new(network_event_tx, cancellation_token);
 
-    //#[test]
-    //pub fn test_error_out_of_ips() {
-    //    let mut network = NodeNetwork::new(2);
+        assert!(node_network.nodes.is_empty());
+        assert!(node_network.addresses.is_empty());
+    }
 
-    //    network.add_node();
-    //    network.add_node();
+    #[test]
+    fn test_adding_new_node() {
+        let (network_event_tx, _) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token);
 
-    //    assert!(network.add_node().is_err());
-    //}
+        let node = node_network.add_node().unwrap();
+
+        assert!(node_network.nodes.contains_key(&node.peer_id));
+        assert!(node_network.addresses.contains_key(&node.peer_id));
+    }
+
+    #[tokio::test]
+    async fn test_connect_two_nodes() {
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+
+        let (network_command_tx, network_command_rx) = mpsc::channel(1);
+        let _task = tokio::spawn(async move {
+            let _ = node_network.run(2, network_command_rx).await;
+        });
+
+        let mut peer_ids = vec![];
+        while peer_ids.len() < 2 {
+            if let Some(event) = network_event_rx.recv().await {
+                if let NetworkEvent::NodeRunning { peer_id, .. } = event {
+                    peer_ids.push(peer_id);
+                }
+            }
+        }
+
+        network_command_tx
+            .send(NetworkCommand::ConnectNodes {
+                peer_one: peer_ids[0],
+                peer_two: peer_ids[1],
+            })
+            .await
+            .unwrap();
+
+        while let Some(event) = network_event_rx.recv().await {
+            if let NetworkEvent::NodesConnected { peer_one, peer_two } = event {
+                assert!(peer_ids[0] == peer_one);
+                assert!(peer_ids[1] == peer_two);
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stop_node() {
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+
+        let (network_command_tx, network_command_rx) = mpsc::channel(1);
+        let _task = tokio::spawn(async move {
+            let _ = node_network.run(1, network_command_rx).await;
+        });
+
+        let mut peer_ids = vec![];
+        while peer_ids.len() < 1 {
+            if let Some(event) = network_event_rx.recv().await {
+                if let NetworkEvent::NodeRunning { peer_id, .. } = event {
+                    peer_ids.push(peer_id);
+                }
+            }
+        }
+
+        network_command_tx
+            .send(NetworkCommand::StopNode {
+                peer_id: peer_ids[0],
+            })
+            .await
+            .unwrap();
+
+        while let Some(event) = network_event_rx.recv().await {
+            if let NetworkEvent::NodeStopped { peer_id } = event {
+                assert!(peer_ids[0] == peer_id);
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_node() {
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+
+        let (network_command_tx, network_command_rx) = mpsc::channel(1);
+        let _task = tokio::spawn(async move {
+            let _ = node_network.run(0, network_command_rx).await;
+        });
+
+        network_command_tx
+            .send(NetworkCommand::StartNode)
+            .await
+            .unwrap();
+
+        while let Some(event) = network_event_rx.recv().await {
+            assert!(matches!(event, NetworkEvent::NodeRunning { .. }));
+            break;
+        }
+    }
 
     //#[tokio::test]
-    //pub async fn test_message_between_two_nodes() {
-    //    let (tx, rx) = build_broadacast_channel();
-    //    let mut network = NodeNetwork::new(2, rx).unwrap();
+    //async fn test_disconnect_two_nodes() {
+    //    let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+    //    let cancellation_token = CancellationToken::new();
+    //    let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
 
-    //    let (mut node_one, mut node_two) = add_two_nodes_to_network(&mut network);
-
-    //    let node_one_stats = node_one.stats.clone();
-
-    //    // The network needs to be running in order to route the
-    //    // message between the two nodes
-    //    let network_handle = tokio::spawn(async move {
-    //        let _ = network.run(2).await;
+    //    let (network_command_tx, network_command_rx) = mpsc::channel(1);
+    //    let _task = tokio::spawn(async move {
+    //        let _ = node_network.run(2, network_command_rx).await;
     //    });
 
-    //    // Only the node recieving the message needs to be running
-    //    // in this case.
-    //    // We needs its handle in order to get the node's stats to verify
-    //    // the message has recieved
-    //    let node_one_handle = tokio::spawn(async move {
-    //        let node_stats = node_one.run().await;
-    //        node_stats
-    //    });
+    //    let mut peer_ids = vec![];
+    //    while peer_ids.len() < 2 {
+    //        if let Some(event) = network_event_rx.recv().await {
+    //            if let NetworkEvent::NodeRunning { peer_id, .. } = event {
+    //                peer_ids.push(peer_id);
+    //            }
+    //        }
+    //    }
 
-    //    let _ = node_two.send_to(node_one_ip, b"test").await.unwrap();
-    //    assert_eq!(node_two.stats.lock().unwrap().sent_count, 1);
+    //    network_command_tx
+    //        .send(NetworkCommand::ConnectNodes {
+    //            peer_one: peer_ids[0],
+    //            peer_two: peer_ids[1],
+    //        })
+    //        .await
+    //        .unwrap();
 
-    //    // We need to add a small sleep to allow for the node to recieve and
-    //    // process the message before sending the kill signal
-    //    tokio::time::sleep(Duration::from_millis(100)).await;
-    //    tx.send(()).unwrap();
+    //    network_command_tx
+    //        .send(NetworkCommand::DisconectNodes {
+    //            peer_one: peer_ids[0],
+    //            peer_two: peer_ids[1],
+    //        })
+    //        .await
+    //        .unwrap();
 
-    //    let _ = node_one_handle.await.unwrap();
-    //    let _ = network_handle.await.unwrap();
-
-    //    assert_eq!(node_one_stats.lock().unwrap().recvd_count, 1);
+    //    while let Some(event) = network_event_rx.recv().await {
+    //        if let NetworkEvent::NodesDisconnected { peer_one, peer_two } = event {
+    //            break;
+    //        }
+    //    }
     //}
 }

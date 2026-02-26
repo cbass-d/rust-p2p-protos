@@ -15,7 +15,7 @@ use libp2p::{
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     identity,
-    kad::{Addresses, Behaviour as Kademlia, KBucketKey, KBucketRef, store::MemoryStore},
+    kad::{Behaviour as Kademlia, store::MemoryStore},
     multiaddr::Protocol,
     noise,
     swarm::{self, SwarmEvent},
@@ -185,6 +185,11 @@ impl Node {
         Ok((node, tx, listen_address))
     }
 
+    /// Whether the node has completed the Kademlia bootstrap process
+    pub fn is_bootstrapped(&self) -> bool {
+        self.bootstrapped
+    }
+
     /// Main run loop of for the node
     #[instrument(skip_all, fields(id = %self.peer_id), name = "run node")]
     pub async fn run(
@@ -268,10 +273,10 @@ impl Node {
 
                             self.current_peers.write().unwrap().insert(peer_id);
 
-                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
+                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id }, Instant::now().duration_since(start).as_secs_f32());
 
                             // Send event of node connections
-                            network_event_tx.send(NetworkEvent::NodesConnected{peer_one: self.peer_id, peer_two: peer_id}).await.unwrap();
+                            network_event_tx.send(NetworkEvent::NodesConnected{peer_one: peer_id, peer_two: self.peer_id}).await.unwrap();
 
                             if !self.bootstrapped {
                                 debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
@@ -286,10 +291,14 @@ impl Node {
                         SwarmEvent::ConnectionClosed { peer_id, endpoint, cause, .. } => {
                             debug!(target: "node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
 
-                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id, endpoint }, Instant::now().duration_since(start).as_secs_f32());
+                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id }, Instant::now().duration_since(start).as_secs_f32());
+
+                            // Send event of nodes disconnecting
+                            network_event_tx.send(NetworkEvent::NodesDisconnected { peer_one: peer_id, peer_two: self.peer_id}).await.unwrap();
 
                             let mut current_peers = self.current_peers.write().unwrap();
                             current_peers.remove(&peer_id);
+
 
                         },
                         SwarmEvent::ListenerClosed { listener_id, addresses, .. } => {
@@ -367,7 +376,7 @@ impl Node {
                     warn!(target: "node", "failed to disconnect from {peer}");
                 }
 
-                None
+                Some(NodeResponse::Disconnected { peer })
             }
             NodeCommand::GetIdentifyInfo => {
                 let info = self.identify_info.clone();
@@ -449,5 +458,96 @@ impl Node {
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Node: {}", self.peer_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use libp2p::kad::Mode;
+    use tokio::{
+        sync::{mpsc, oneshot},
+        time::Instant,
+    };
+    use tokio_util::sync::CancellationToken;
+
+    use crate::{
+        messages::{NetworkEvent, NodeCommand, NodeResponse},
+        node::Node,
+    };
+
+    #[test]
+    fn test_new_node() {
+        let (node, _, listen_address) = Node::new().unwrap();
+
+        // Validate the new node is in the proper state
+        assert!(!node.is_bootstrapped());
+        assert!(!node.quit);
+        assert!(node.current_peers.read().unwrap().len() == 0);
+        assert!(node.known_peers.len() == 0);
+        assert!(node.logs.read().unwrap().0.all_messages().len() == 0);
+        assert!(node.logs.read().unwrap().1.recvd_count == 0);
+        assert!(node.logs.read().unwrap().1.sent_count == 0);
+
+        assert!(node.listen_address == listen_address);
+        assert!(node.identify_info.listen_addr == listen_address);
+        assert!(node.identify_info.public_key.to_peer_id() == node.peer_id);
+
+        assert!(!node.kad_info.bootstrapped);
+        assert!(node.kad_info.mode == Mode::Client);
+    }
+
+    #[tokio::test]
+    async fn test_handle_get_kad_info() {
+        let (mut node, command_tx, _listen_address) = Node::new().unwrap();
+        let kad_info = node.kad_info.clone();
+
+        let (network_tx, _network_rx) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let _task = tokio::task::spawn(async move {
+            let _ = node
+                .run(Instant::now(), network_tx, cancellation_token)
+                .await;
+        });
+
+        let (tx, reply_rx) = oneshot::channel::<NodeResponse>();
+
+        command_tx
+            .send((NodeCommand::GetKademliaInfo, tx))
+            .await
+            .unwrap();
+
+        let response = reply_rx.await.unwrap();
+
+        assert!(response == NodeResponse::KademliaInfo { info: kad_info });
+    }
+
+    #[tokio::test]
+    async fn test_handle_get_identify_info() {
+        let (mut node, command_tx, _listen_address) = Node::new().unwrap();
+        let identify_info = node.identify_info.clone();
+
+        let (network_tx, _network_rx) = mpsc::channel::<NetworkEvent>(1);
+        let cancellation_token = CancellationToken::new();
+        let _task = tokio::task::spawn(async move {
+            let _ = node
+                .run(Instant::now(), network_tx, cancellation_token)
+                .await;
+        });
+
+        let (tx, reply_rx) = oneshot::channel::<NodeResponse>();
+
+        command_tx
+            .send((NodeCommand::GetIdentifyInfo, tx))
+            .await
+            .unwrap();
+
+        let response = reply_rx.await.unwrap();
+
+        assert!(
+            response
+                == NodeResponse::IdentifyInfo {
+                    info: identify_info
+                }
+        );
     }
 }

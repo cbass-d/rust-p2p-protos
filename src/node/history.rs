@@ -15,15 +15,12 @@ use tracing::debug;
 pub enum SwarmEventInfo {
     ConnectionEstablished {
         peer_id: PeerId,
-        endpoint: ConnectedPoint,
     },
     ConnectionClosed {
         peer_id: PeerId,
-        endpoint: ConnectedPoint,
     },
     IncomingConnection {
         peer_id: PeerId,
-        endpoint: ConnectedPoint,
     },
     ListenerClosed {
         listener_id: ListenerId,
@@ -331,17 +328,108 @@ pub fn format_swarm_event_to_string(event: &SwarmEventInfo) -> String {
                 listener_id, addresses
             )
         }
-        SwarmEventInfo::ConnectionClosed { peer_id, endpoint } => {
+        SwarmEventInfo::ConnectionClosed { peer_id, .. } => {
             format!("CONNECTION CLOSED The connection with {} closed", peer_id)
         }
-        SwarmEventInfo::IncomingConnection { peer_id, endpoint } => {
+        SwarmEventInfo::IncomingConnection { peer_id, .. } => {
             format!("INCOMING CONNECTION New connection from {}", peer_id)
         }
-        SwarmEventInfo::ConnectionEstablished { peer_id, endpoint } => {
+        SwarmEventInfo::ConnectionEstablished { peer_id, .. } => {
             format!(
                 "CONNECTION ESTABLISHED Connection established with {}",
                 peer_id
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use libp2p::{Multiaddr, PeerId, core::transport::ListenerId, identity};
+
+    use crate::node::history::{SwarmEventInfo, format_swarm_event_to_string};
+
+    fn random_peer_id() -> PeerId {
+        identity::PeerId::random()
+    }
+
+    fn memory_addr(port: u64) -> Multiaddr {
+        format!("/memory/{}", port).parse().unwrap()
+    }
+
+    #[test]
+    fn test_format_connection_established() {
+        let peer_id = random_peer_id();
+        let event = SwarmEventInfo::ConnectionEstablished { peer_id };
+
+        let formatted = format_swarm_event_to_string(&event);
+
+        assert!(formatted.starts_with("CONNECTION ESTABLISHED"));
+        assert!(formatted.contains(&peer_id.to_string()));
+    }
+
+    #[test]
+    fn test_format_dialing() {
+        let peer_id = Some(random_peer_id());
+        let event = SwarmEventInfo::Dialing { peer_id };
+
+        let formatted = format_swarm_event_to_string(&event);
+
+        assert!(formatted.starts_with("DIALING"));
+        assert!(formatted.contains(&peer_id.unwrap().to_string()));
+    }
+
+    #[test]
+    fn test_format_new_listen_addr() {
+        let address = memory_addr(1234);
+        let listener_id = ListenerId::next();
+        let event = SwarmEventInfo::NewListenAddr {
+            listener_id,
+            address: address.clone(),
+        };
+
+        let formatted = format_swarm_event_to_string(&event);
+
+        assert!(formatted.starts_with("NEW LISTENER"));
+        assert!(formatted.contains(&listener_id.to_string()));
+        assert!(formatted.contains(&address.to_string()));
+    }
+
+    #[test]
+    fn test_format_listener_closed() {
+        let address = memory_addr(1234);
+        let listener_id = ListenerId::next();
+        let event = SwarmEventInfo::ListenerClosed {
+            listener_id,
+            addresses: vec![address.clone()],
+        };
+
+        let formatted = format_swarm_event_to_string(&event);
+
+        assert!(formatted.starts_with("LISTENER CLOSED"));
+        assert!(formatted.contains(&listener_id.to_string()));
+        assert!(formatted.contains(&address.to_string()));
+    }
+
+    #[test]
+    fn test_format_connection_closed() {
+        let peer_id = random_peer_id();
+        let event = SwarmEventInfo::ConnectionClosed { peer_id };
+
+        let formatted = format_swarm_event_to_string(&event);
+
+        assert!(formatted.starts_with("CONNECTION CLOSED"));
+        assert!(formatted.contains(&peer_id.to_string()));
+    }
+
+    #[test]
+    fn test_format_incoming_connections() {
+        let peer_id = random_peer_id();
+        let event = SwarmEventInfo::IncomingConnection { peer_id };
+
+        let formatted = format_swarm_event_to_string(&event);
+
+        assert!(formatted.starts_with("INCOMING CONNECTION"));
+        assert!(formatted.contains(&peer_id.to_string()));
     }
 }

@@ -113,13 +113,13 @@ impl IdentifyInfo {
             let info = self.info.clone().unwrap();
             let lines = Text::from(vec![
                 Line::raw("Peer Id:").style(Style::new().underlined()),
-                Line::from(format!("    {}", info.public_key.to_peer_id())),
+                Line::from(format!("{}", info.public_key.to_peer_id())),
                 Line::raw("Protocol Version:").style(Style::new().underlined().bold()),
-                Line::from(format!("    {}", info.protocol_version)),
+                Line::from(format!("{}", info.protocol_version)),
                 Line::raw("Agent String:").style(Style::new().underlined()),
-                Line::from(format!("    {}", info.agent_string)),
+                Line::from(format!("{}", info.agent_string)),
                 Line::raw("Listen Address:").style(Style::new().underlined()),
-                Line::from(format!("    {}", info.listen_addr.to_string())),
+                Line::from(format!("{}", info.listen_addr.to_string())),
             ]);
             Paragraph::new(lines)
                 .block(block)

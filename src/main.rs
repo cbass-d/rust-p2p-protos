@@ -53,11 +53,7 @@ async fn main() -> Result<()> {
     // - network_command_rx: used for the node network receive commands from the TUI module
     let (mut app, cancellation_token, network_event_tx, network_command_rx) = App::new();
 
-    let mut network = NodeNetwork::new(
-        number_of_nodes,
-        network_event_tx.clone(),
-        cancellation_token.clone(),
-    );
+    let mut network = NodeNetwork::new(network_event_tx.clone(), cancellation_token.clone());
 
     // Run the TUI task
     task_set.spawn(async move {

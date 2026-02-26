@@ -432,6 +432,7 @@ impl App {
 
                 actions.push_back(Action::UpdateConnections { peer_one, peer_two });
             }
+            NetworkEvent::NodesDisconnected { peer_one, peer_two } => {}
             NetworkEvent::IdentifyInfo { info } => {
                 self.popup.identify_info.set_info(info);
             }

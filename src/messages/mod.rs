@@ -24,6 +24,9 @@ pub enum NetworkEvent {
     /// Two nodes have established a connection between each other
     NodesConnected { peer_one: PeerId, peer_two: PeerId },
 
+    /// Two nodes have closed the connection between each other
+    NodesDisconnected { peer_one: PeerId, peer_two: PeerId },
+
     /// The local identify info for a node
     IdentifyInfo { info: IdentifyInfo },
 
@@ -73,11 +76,14 @@ pub enum NodeCommand {
 }
 
 /// The response a node sends back after receiving a NodeCommand
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum NodeResponse {
     /// Local identify info
     IdentifyInfo { info: IdentifyInfo },
 
     /// Kademlia info
     KademliaInfo { info: KademliaInfo },
+
+    /// Disconnected from peer
+    Disconnected { peer: PeerId },
 }

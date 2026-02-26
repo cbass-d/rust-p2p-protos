@@ -118,16 +118,25 @@ impl KademliaInfo {
                 Line::from(format!("{}", info.bootstrapped)),
                 Line::raw("Closest Local Peers:").style(Style::new().underlined()),
             ]);
-            info.closest_peers.iter().for_each(|p| {
-                lines.push_line(Line::from(format!("- {}", p)));
-            });
+            if info.closest_peers.is_empty() {
+                lines.push_line(Line::from("None"));
+            } else {
+                info.closest_peers.iter().for_each(|p| {
+                    lines.push_line(Line::from(format!("- {}", p)));
+                });
+            }
             lines.push_line(Line::raw("Buckets:").style(Style::new().underlined()));
-            info.bucket_info.iter().enumerate().for_each(|(i, kb)| {
-                lines.push_line(Line::from(format!(
-                    "Bucket {i} - {} total entries",
-                    kb.num_entries
-                )));
-            });
+
+            if info.bucket_info.is_empty() {
+                lines.push_line(Line::from("None"));
+            } else {
+                info.bucket_info.iter().enumerate().for_each(|(i, kb)| {
+                    lines.push_line(Line::from(format!(
+                        "Bucket {i} - {} total entries",
+                        kb.num_entries
+                    )));
+                });
+            }
 
             Paragraph::new(lines)
                 .block(block)
