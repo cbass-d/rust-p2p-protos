@@ -383,46 +383,48 @@ mod tests {
         }
     }
 
-    //#[tokio::test]
-    //async fn test_disconnect_two_nodes() {
-    //    let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
-    //    let cancellation_token = CancellationToken::new();
-    //    let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+    #[tokio::test]
+    async fn test_disconnect_two_nodes() {
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(10);
+        let cancellation_token = CancellationToken::new();
+        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
 
-    //    let (network_command_tx, network_command_rx) = mpsc::channel(1);
-    //    let _task = tokio::spawn(async move {
-    //        let _ = node_network.run(2, network_command_rx).await;
-    //    });
+        let (network_command_tx, network_command_rx) = mpsc::channel(1);
+        let _task = tokio::spawn(async move {
+            let _ = node_network.run(2, network_command_rx).await;
+        });
 
-    //    let mut peer_ids = vec![];
-    //    while peer_ids.len() < 2 {
-    //        if let Some(event) = network_event_rx.recv().await {
-    //            if let NetworkEvent::NodeRunning { peer_id, .. } = event {
-    //                peer_ids.push(peer_id);
-    //            }
-    //        }
-    //    }
+        let mut peer_ids = vec![];
+        while peer_ids.len() < 2 {
+            if let Some(event) = network_event_rx.recv().await {
+                if let NetworkEvent::NodeRunning { peer_id, .. } = event {
+                    peer_ids.push(peer_id);
+                }
+            }
+        }
 
-    //    network_command_tx
-    //        .send(NetworkCommand::ConnectNodes {
-    //            peer_one: peer_ids[0],
-    //            peer_two: peer_ids[1],
-    //        })
-    //        .await
-    //        .unwrap();
+        network_command_tx
+            .send(NetworkCommand::ConnectNodes {
+                peer_one: peer_ids[0],
+                peer_two: peer_ids[1],
+            })
+            .await
+            .unwrap();
 
-    //    network_command_tx
-    //        .send(NetworkCommand::DisconectNodes {
-    //            peer_one: peer_ids[0],
-    //            peer_two: peer_ids[1],
-    //        })
-    //        .await
-    //        .unwrap();
+        network_command_tx
+            .send(NetworkCommand::DisconectNodes {
+                peer_one: peer_ids[0],
+                peer_two: peer_ids[1],
+            })
+            .await
+            .unwrap();
 
-    //    while let Some(event) = network_event_rx.recv().await {
-    //        if let NetworkEvent::NodesDisconnected { peer_one, peer_two } = event {
-    //            break;
-    //        }
-    //    }
-    //}
+        while let Some(event) = network_event_rx.recv().await {
+            if let NetworkEvent::NodesDisconnected { peer_one, peer_two } = event {
+                assert!(peer_ids[0] == peer_one);
+                assert!(peer_ids[1] == peer_two);
+                break;
+            }
+        }
+    }
 }
