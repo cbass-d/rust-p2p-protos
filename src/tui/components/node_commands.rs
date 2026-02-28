@@ -1,18 +1,14 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, RwLock},
-};
+use std::collections::VecDeque;
 
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
-use indexmap::IndexSet;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListState, Padding, Paragraph, Widget, Wrap},
+    layout::{Alignment, Rect},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListState, Padding, Widget},
 };
 use tracing::debug;
 
@@ -28,9 +24,6 @@ pub struct NodeCommands {
 
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
-
-    /// If the component is currenlty in focus in the TUI
-    focus: bool,
 }
 
 impl NodeCommands {
@@ -39,12 +32,7 @@ impl NodeCommands {
             node: None,
             len: 3,
             list_state: ListState::default().with_selected(Some(0)),
-            focus: false,
         }
-    }
-
-    pub fn focus(&mut self, focus: bool) {
-        self.focus = focus;
     }
 
     pub fn set_node(&mut self, node: PeerId) {
@@ -62,13 +50,7 @@ impl NodeCommands {
     /// Moving up and down the listcan move past the bounds of the list,
     /// we must make sure it does not
     pub fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len {
-            self.len - 1
-        } else if idx < 0 {
-            0
-        } else {
-            idx
-        }
+        if idx >= self.len { self.len - 1 } else { idx }
     }
 
     pub fn handle_key_event(
@@ -148,7 +130,7 @@ impl NodeCommands {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayNodeCommands { peer_id } => {
                 self.node = Some(peer_id);

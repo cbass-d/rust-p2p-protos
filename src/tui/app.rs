@@ -10,7 +10,7 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent, KeyEventKind},
     layout::{Constraint, Direction, Layout, Rect},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace};
 
@@ -20,10 +20,7 @@ use crate::{
     tui::{
         Tui, TuiEvent,
         components::{
-            manage_connections::ManageConnections,
             node_box::NodeBox,
-            node_commands::NodeCommands,
-            node_info::NodeInfo,
             node_list::NodeList,
             node_log::NodeLog,
             popup::{PopUpContent, Popup},
@@ -337,7 +334,7 @@ impl App {
                     .await
                     .unwrap();
             }
-            Action::RemoveNode { peer_id } => {
+            Action::RemoveNode { .. } => {
                 self.focus_list_graph();
                 self.actions.push_back(Action::CloseNodeCommands);
             }
@@ -416,7 +413,7 @@ impl App {
                 self.node_logs.insert(peer_id, message_history);
 
                 actions.push_back(Action::AddNode {
-                    peer_id: peer_id,
+                    peer_id,
                     node_connections,
                 });
             }
@@ -432,7 +429,7 @@ impl App {
 
                 actions.push_back(Action::UpdateConnections { peer_one, peer_two });
             }
-            NetworkEvent::NodesDisconnected { peer_one, peer_two } => {}
+            NetworkEvent::NodesDisconnected { .. } => {}
             NetworkEvent::IdentifyInfo { info } => {
                 self.popup.identify_info.set_info(info);
             }
@@ -456,7 +453,7 @@ impl App {
 
         match self.focus {
             Focus::NodeList => {
-                self.node_box.handle_key_event(key_event, actions);
+                let _ = self.node_box.handle_key_event(key_event, actions);
                 self.node_list.handle_key_event(key_event, actions)?
             }
             Focus::NodeLog => self.node_log.handle_key_event(key_event, actions)?,

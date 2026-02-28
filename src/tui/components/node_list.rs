@@ -128,13 +128,7 @@ impl NodeList {
     /// Moving up and down the listcan move past the bounds of the list,
     /// we must make sure it does not
     pub fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len {
-            self.len - 1
-        } else if idx < 0 {
-            0
-        } else {
-            idx
-        }
+        if idx >= self.len { self.len - 1 } else { idx }
     }
 
     pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {

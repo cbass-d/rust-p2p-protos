@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, ListState, Padding, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Padding, Paragraph, Widget, Wrap},
 };
 
 use crate::{
@@ -22,16 +22,8 @@ pub struct IdentifyInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
-    /// The length of the List
-    len: usize,
-
-    /// The state of the list (currently selected, next, etc.)
-    pub list_state: ListState,
-
+    /// The local identify info for the node
     info: Option<NodeIdentifyInfo>,
-
-    /// If the component is currenlty in focus in the TUI
-    focus: bool,
 }
 
 impl IdentifyInfo {
@@ -39,10 +31,7 @@ impl IdentifyInfo {
     pub fn new() -> Self {
         Self {
             node: None,
-            len: 2,
-            list_state: ListState::default().with_selected(Some(0)),
             info: None,
-            focus: false,
         }
     }
 
@@ -54,11 +43,6 @@ impl IdentifyInfo {
     /// Set the info for the component context
     pub fn set_info(&mut self, info: NodeIdentifyInfo) {
         self.info = Some(info);
-    }
-
-    /// Set the focus field for the component
-    pub fn focus(&mut self, focus: bool) {
-        self.focus = focus;
     }
 
     /// Handle a key event comming from the TUI
@@ -113,13 +97,13 @@ impl IdentifyInfo {
             let info = self.info.clone().unwrap();
             let lines = Text::from(vec![
                 Line::raw("Peer Id:").style(Style::new().underlined()),
-                Line::from(format!("{}", info.public_key.to_peer_id())),
+                Line::from(info.public_key.to_peer_id().to_string()),
                 Line::raw("Protocol Version:").style(Style::new().underlined().bold()),
-                Line::from(format!("{}", info.protocol_version)),
+                Line::from(info.protocol_version.to_string()),
                 Line::raw("Agent String:").style(Style::new().underlined()),
-                Line::from(format!("{}", info.agent_string)),
+                Line::from(info.agent_string.to_string()),
                 Line::raw("Listen Address:").style(Style::new().underlined()),
-                Line::from(format!("{}", info.listen_addr.to_string())),
+                Line::from(info.listen_addr.to_string()),
             ]);
             Paragraph::new(lines)
                 .block(block)
@@ -129,7 +113,7 @@ impl IdentifyInfo {
     }
 
     /// Update IdentifyInfo with the provided Action component as needed
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayNodeCommands { peer_id } => {
                 self.node = Some(peer_id);

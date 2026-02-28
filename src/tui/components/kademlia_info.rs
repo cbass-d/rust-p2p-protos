@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, ListState, Padding, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Padding, Paragraph, Widget, Wrap},
 };
 
 use crate::{
@@ -22,16 +22,8 @@ pub struct KademliaInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
-    /// The length of the List
-    len: usize,
-
-    /// The state of the list (currently selected, next, etc.)
-    pub list_state: ListState,
-
+    /// The local kademlia info for the node
     info: Option<NodeKademliaInfo>,
-
-    /// If the component is currenlty in focus in the TUI
-    focus: bool,
 }
 
 impl KademliaInfo {
@@ -39,10 +31,7 @@ impl KademliaInfo {
     pub fn new() -> Self {
         Self {
             node: None,
-            len: 2,
-            list_state: ListState::default().with_selected(Some(0)),
             info: None,
-            focus: false,
         }
     }
 
@@ -54,11 +43,6 @@ impl KademliaInfo {
     /// Set the info for the component context
     pub fn set_info(&mut self, info: NodeKademliaInfo) {
         self.info = Some(info);
-    }
-
-    /// Set the focus field for the component
-    pub fn focus(&mut self, focus: bool) {
-        self.focus = focus;
     }
 
     /// Handle a key event comming from the TUI
@@ -146,7 +130,7 @@ impl KademliaInfo {
     }
 
     /// Update IdentifyInfo with the provided Action component as needed
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayNodeCommands { peer_id } => {
                 self.node = Some(peer_id);

@@ -34,9 +34,6 @@ pub struct NodeNetwork {
 
     /// The Instant that the network started, used to stamp swarm events
     network_start: Instant,
-
-    /// The number of packets the network has seen in total
-    packets: u64,
 }
 
 impl NodeNetwork {
@@ -54,7 +51,6 @@ impl NodeNetwork {
             network_event_tx,
             cancellation_token,
             network_start: Instant::now(),
-            packets: 0,
         }
     }
 
@@ -133,19 +129,19 @@ impl NodeNetwork {
     ) -> JoinSet<Result<NodeResult>> {
         match command {
             NetworkCommand::ConnectNodes { peer_one, peer_two } => {
-                if let Some(node_channel) = self.nodes.get(&peer_one) {
-                    if let Some(address) = self.addresses.get(&peer_two) {
-                        let (tx, reply_rx) = oneshot::channel();
-                        node_channel
-                            .send((
-                                NodeCommand::ConnectTo {
-                                    peer: address.to_owned(),
-                                },
-                                tx,
-                            ))
-                            .await
-                            .unwrap();
-                    }
+                if let Some(node_channel) = self.nodes.get(&peer_one)
+                    && let Some(address) = self.addresses.get(&peer_two)
+                {
+                    let (tx, _reply_rx) = oneshot::channel();
+                    node_channel
+                        .send((
+                            NodeCommand::ConnectTo {
+                                peer: address.to_owned(),
+                            },
+                            tx,
+                        ))
+                        .await
+                        .unwrap();
                 }
             }
             NetworkCommand::DisconectNodes { peer_one, peer_two } => {
@@ -156,21 +152,18 @@ impl NodeNetwork {
                         .await
                         .unwrap();
 
-                    let response = reply_rx.await.unwrap();
+                    let response = reply_rx.await;
 
                     debug!(target: "node_network", "nodes disconnected");
 
-                    match response {
-                        NodeResponse::Disconnected { peer } => {
-                            self.network_event_tx
-                                .send(NetworkEvent::NodesDisconnected {
-                                    peer_one,
-                                    peer_two: peer,
-                                })
-                                .await
-                                .unwrap();
-                        }
-                        _ => {}
+                    if let Ok(NodeResponse::Disconnected { peer }) = response {
+                        self.network_event_tx
+                            .send(NetworkEvent::NodesDisconnected {
+                                peer_one,
+                                peer_two: peer,
+                            })
+                            .await
+                            .unwrap();
                     }
                 }
             }
@@ -183,18 +176,15 @@ impl NodeNetwork {
                         .await
                         .unwrap();
 
-                    let response = reply_rx.await.unwrap();
+                    let response = reply_rx.await;
 
                     debug!(target: "node_network", "received identify info: {:?}", response);
 
-                    match response {
-                        NodeResponse::IdentifyInfo { info } => {
-                            self.network_event_tx
-                                .send(NetworkEvent::IdentifyInfo { info })
-                                .await
-                                .unwrap();
-                        }
-                        _ => {}
+                    if let Ok(NodeResponse::IdentifyInfo { info }) = response {
+                        self.network_event_tx
+                            .send(NetworkEvent::IdentifyInfo { info })
+                            .await
+                            .unwrap();
                     }
                 }
             }
@@ -207,24 +197,21 @@ impl NodeNetwork {
                         .await
                         .unwrap();
 
-                    let response = reply_rx.await.unwrap();
+                    let response = reply_rx.await;
 
                     debug!(target: "node_network", "received kademlia info: {:?}", response);
 
-                    match response {
-                        NodeResponse::KademliaInfo { info } => {
-                            self.network_event_tx
-                                .send(NetworkEvent::KademliaInfo { info })
-                                .await
-                                .unwrap();
-                        }
-                        _ => {}
+                    if let Ok(NodeResponse::KademliaInfo { info }) = response {
+                        self.network_event_tx
+                            .send(NetworkEvent::KademliaInfo { info })
+                            .await
+                            .unwrap();
                     }
                 }
             }
             NetworkCommand::StopNode { peer_id } => {
                 if let Some(node_channel) = self.nodes.get(&peer_id) {
-                    let (tx, reply_rx) = oneshot::channel();
+                    let (tx, _reply_rx) = oneshot::channel();
                     node_channel.send((NodeCommand::Stop, tx)).await.unwrap();
                 }
             }
@@ -250,7 +237,6 @@ impl NodeNetwork {
 
                 debug!(target: "node_network", "new node task spawned");
             }
-            _ => {}
         }
 
         node_task_set
@@ -302,10 +288,8 @@ mod tests {
 
         let mut peer_ids = vec![];
         while peer_ids.len() < 2 {
-            if let Some(event) = network_event_rx.recv().await {
-                if let NetworkEvent::NodeRunning { peer_id, .. } = event {
-                    peer_ids.push(peer_id);
-                }
+            if let Some(NetworkEvent::NodeRunning { peer_id, .. }) = network_event_rx.recv().await {
+                peer_ids.push(peer_id);
             }
         }
 
@@ -338,11 +322,9 @@ mod tests {
         });
 
         let mut peer_ids = vec![];
-        while peer_ids.len() < 1 {
-            if let Some(event) = network_event_rx.recv().await {
-                if let NetworkEvent::NodeRunning { peer_id, .. } = event {
-                    peer_ids.push(peer_id);
-                }
+        while peer_ids.is_empty() {
+            if let Some(NetworkEvent::NodeRunning { peer_id, .. }) = network_event_rx.recv().await {
+                peer_ids.push(peer_id);
             }
         }
 
@@ -353,8 +335,8 @@ mod tests {
             .await
             .unwrap();
 
-        while let Some(event) = network_event_rx.recv().await {
-            if let NetworkEvent::NodeStopped { peer_id } = event {
+        loop {
+            if let Some(NetworkEvent::NodeStopped { peer_id }) = network_event_rx.recv().await {
                 assert!(peer_ids[0] == peer_id);
                 break;
             }
@@ -378,8 +360,10 @@ mod tests {
             .unwrap();
 
         while let Some(event) = network_event_rx.recv().await {
-            assert!(matches!(event, NetworkEvent::NodeRunning { .. }));
-            break;
+            if let NetworkEvent::NodeRunning { .. } = event {
+                assert!(matches!(event, NetworkEvent::NodeRunning { .. }));
+                break;
+            }
         }
     }
 
@@ -396,10 +380,8 @@ mod tests {
 
         let mut peer_ids = vec![];
         while peer_ids.len() < 2 {
-            if let Some(event) = network_event_rx.recv().await {
-                if let NetworkEvent::NodeRunning { peer_id, .. } = event {
-                    peer_ids.push(peer_id);
-                }
+            if let Some(NetworkEvent::NodeRunning { peer_id, .. }) = network_event_rx.recv().await {
+                peer_ids.push(peer_id);
             }
         }
 
@@ -419,8 +401,10 @@ mod tests {
             .await
             .unwrap();
 
-        while let Some(event) = network_event_rx.recv().await {
-            if let NetworkEvent::NodesDisconnected { peer_one, peer_two } = event {
+        loop {
+            if let Some(NetworkEvent::NodesDisconnected { peer_one, peer_two }) =
+                network_event_rx.recv().await
+            {
                 assert!(peer_ids[0] == peer_one);
                 assert!(peer_ids[1] == peer_two);
                 break;

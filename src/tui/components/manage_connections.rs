@@ -37,9 +37,6 @@ pub struct ManageConnections {
 
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
-
-    /// If the component is currenlty in focus in the TUI
-    focus: bool,
 }
 
 impl ManageConnections {
@@ -50,7 +47,6 @@ impl ManageConnections {
             active_nodes: IndexSet::new(),
             node_connections: HashMap::default(),
             len: 0,
-            focus: false,
             list_state: ListState::default(),
         }
     }
@@ -58,11 +54,6 @@ impl ManageConnections {
     /// Set the node for the component context
     pub fn set_node(&mut self, node: PeerId) {
         self.node = Some(node);
-    }
-
-    /// Set the focus field for the component
-    pub fn focus(&mut self, focus: bool) {
-        self.focus = focus;
     }
 
     pub fn select_next(&mut self) {
@@ -76,13 +67,7 @@ impl ManageConnections {
     /// Moving up and down the listcan move past the bounds of the list,
     /// we must make sure it does not
     pub fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len {
-            self.len - 1
-        } else if idx < 0 {
-            0
-        } else {
-            idx
-        }
+        if idx >= self.len { self.len - 1 } else { idx }
     }
 
     /// Handle a key event comming from the TUI
@@ -185,9 +170,9 @@ impl ManageConnections {
                 .iter()
                 .map(|p| {
                     if connected_to.contains(p) {
-                        format!("[*] {}", p.to_string())
+                        format!("[*] {}", p)
                     } else {
-                        format!("[ ] {}", p.to_string())
+                        format!("[ ] {}", p)
                     }
                 })
                 .collect::<Vec<String>>()
@@ -196,7 +181,7 @@ impl ManageConnections {
         }
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayManageConnections { peer_id } => {
                 self.node = Some(peer_id);

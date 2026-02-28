@@ -1,21 +1,18 @@
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
-use libp2p::PeerId;
 use ratatui::{
     Frame,
-    buffer::Buffer,
     layout::{Alignment, Margin, Rect},
     style::{Color, Style},
     widgets::{
         Block, Borders, List, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, StatefulWidget, Widget,
+        ScrollbarState, Widget,
     },
 };
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     sync::{Arc, RwLock},
 };
-use tracing::debug;
 
 use crate::{
     node::{NodeStats, history::MessageHistory},
@@ -24,7 +21,6 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct NodeLog {
-    active_nodes: HashSet<PeerId>,
     selected: Option<Arc<RwLock<(MessageHistory, NodeStats)>>>,
     pub list_state: ListState,
     pub scrollbar_state: ScrollbarState,
@@ -36,7 +32,6 @@ pub struct NodeLog {
 impl NodeLog {
     pub fn new() -> Self {
         Self {
-            active_nodes: HashSet::new(),
             selected: None,
             list_state: ListState::default(),
             scrollbar_state: ScrollbarState::default(),
@@ -49,12 +44,12 @@ impl NodeLog {
         self.focus = focus;
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {}
+    pub fn update(&mut self, _action: Action, _actions: &mut VecDeque<Action>) {}
 
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        _actions: &mut VecDeque<Action>,
     ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
@@ -87,8 +82,6 @@ impl NodeLog {
         let curr_length = self.len;
         if new_pos > curr_length {
             curr_length
-        } else if new_pos < 0 {
-            0
         } else {
             new_pos
         }
@@ -97,13 +90,7 @@ impl NodeLog {
     /// Moving up and down the listcan move past the bounds of the list,
     /// we must make sure it does not
     fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len {
-            self.len - 1
-        } else if idx < 0 {
-            0
-        } else {
-            idx
-        }
+        if idx >= self.len { self.len - 1 } else { idx }
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {

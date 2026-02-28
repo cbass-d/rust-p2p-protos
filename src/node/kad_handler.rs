@@ -64,38 +64,38 @@ fn on_inbound_req(_node: &mut Node, request: InboundRequest) {
 fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: ProgressStep) {
     match result {
         QueryResult::Bootstrap(Ok(res)) => {
-            if let Some(qid) = node.kad_queries.bootsrap_id {
-                if id == qid {
-                    if step.last {
-                        node.kad_queries.bootsrap_id = None;
-                        node.bootstrapped = true;
-                        node.kad_info.set_bootstrapped(true);
+            if let Some(qid) = node.kad_queries.bootsrap_id
+                && id == qid
+            {
+                if step.last {
+                    node.kad_queries.bootsrap_id = None;
+                    node.bootstrapped = true;
+                    node.kad_info.set_bootstrapped(true);
 
-                        info!(target: "kademlia_events", "kademlia bootstrapped");
+                    info!(target: "kademlia_events", "kademlia bootstrapped");
 
-                        // Once the bootstrap nodes are connected to other
-                        // bootstrap nodes we can set them to server mode
-                        //if peer.is_bootstrap {
-                        //    peer.swarm
-                        //        .behaviour_mut()
-                        //        .kademlia
-                        //        .set_mode(Some(Mode::Server));
-                        //}
+                    // Once the bootstrap nodes are connected to other
+                    // bootstrap nodes we can set them to server mode
+                    //if peer.is_bootstrap {
+                    //    peer.swarm
+                    //        .behaviour_mut()
+                    //        .kademlia
+                    //        .set_mode(Some(Mode::Server));
+                    //}
 
-                        // Get other providers of the agent string to
-                        // get info about mesh
+                    // Get other providers of the agent string to
+                    // get info about mesh
 
-                        let key = RecordKey::new(&NODE_NETWORK_AGENT);
-                        let qid = node.swarm.behaviour_mut().kad.get_providers(key);
+                    let key = RecordKey::new(&NODE_NETWORK_AGENT);
+                    let qid = node.swarm.behaviour_mut().kad.get_providers(key);
 
-                        node.kad_queries.get_providers_id = Some(qid);
-                    } else {
-                        debug!(
-                            target: "kademlia_events",
-                            "kademlia bootstrapping peer {}, remaining {}",
-                            res.peer, res.num_remaining
-                        )
-                    }
+                    node.kad_queries.get_providers_id = Some(qid);
+                } else {
+                    debug!(
+                        target: "kademlia_events",
+                        "kademlia bootstrapping peer {}, remaining {}",
+                        res.peer, res.num_remaining
+                    )
                 }
             }
         }
@@ -114,57 +114,58 @@ fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: Prog
             warn!(target: "kademlia_events", "get closest peers error: {e}");
         }
         QueryResult::GetProviders(Ok(providers)) => {
-            if let Some(qid) = node.kad_queries.get_providers_id {
-                if id == qid {
-                    match providers {
-                        kad::GetProvidersOk::FoundProviders { key, providers } => {
-                            let key = String::from_utf8(key.to_vec());
-                            debug!(target: "kademlia_events", "found providers for {:?}:", key);
-                            for provider in &providers {
-                                debug!(target: "kademlia_events", "- {provider}");
+            if let Some(qid) = node.kad_queries.get_providers_id
+                && id == qid
+            {
+                match providers {
+                    kad::GetProvidersOk::FoundProviders { key, providers } => {
+                        let key = String::from_utf8(key.to_vec());
+                        debug!(target: "kademlia_events", "found providers for {:?}:", key);
+                        for provider in &providers {
+                            debug!(target: "kademlia_events", "- {provider}");
 
-                                // Get other possible/peers providers
-                                node.swarm.behaviour_mut().kad.get_closest_peers(*provider);
-                            }
-                            node.kad_queries.get_providers_id = None;
+                            // Get other possible/peers providers
+                            node.swarm.behaviour_mut().kad.get_closest_peers(*provider);
                         }
-                        kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
-                            debug!(target: "kademlia_events", "get proivders closest_peers: {:?}", closest_peers);
-                            for new_peer in &closest_peers {
-                                debug!(target: "kademlia_events", "- {new_peer}");
+                        node.kad_queries.get_providers_id = None;
+                    }
+                    kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                        debug!(target: "kademlia_events", "get proivders closest_peers: {:?}", closest_peers);
+                        for new_peer in &closest_peers {
+                            debug!(target: "kademlia_events", "- {new_peer}");
 
-                                // Get other possible/peers providers
-                                node.swarm.behaviour_mut().kad.get_closest_peers(*new_peer);
-                            }
+                            // Get other possible/peers providers
+                            node.swarm.behaviour_mut().kad.get_closest_peers(*new_peer);
                         }
                     }
                 }
             }
         }
         QueryResult::GetProviders(Err(e)) => {
-            if let Some(qid) = node.kad_queries.get_providers_id {
-                if id == qid {
-                    node.kad_queries.get_providers_id = None;
-                    error!(target: "kademlia_events", "falied to get providers for wg mesh agent string: {e}");
-                }
+            if let Some(qid) = node.kad_queries.get_providers_id
+                && id == qid
+            {
+                node.kad_queries.get_providers_id = None;
+                error!(target: "kademlia_events", "falied to get providers for wg mesh agent string: {e}");
             }
         }
         QueryResult::StartProviding(Ok(_)) => {
-            if let Some(qid) = node.kad_queries.providing_agent_id {
-                if id == qid && step.last {
-                    node.kad_queries.providing_agent_id = None;
-                    debug!(target: "kademlia_events", "node providing wg mesh agent string");
-                }
+            if let Some(qid) = node.kad_queries.providing_agent_id
+                && id == qid
+                && step.last
+            {
+                node.kad_queries.providing_agent_id = None;
+                debug!(target: "kademlia_events", "node providing wg mesh agent string");
             }
         }
         QueryResult::StartProviding(Err(e)) => {
             warn!(target: "kademlia_events", "start providing error: {e}");
 
-            if let Some(qid) = node.kad_queries.providing_agent_id {
-                if id == qid {
-                    error!(target: "kademlia_events", "failed to provide wg agent string");
-                    node.kad_queries.providing_agent_id = None;
-                }
+            if let Some(qid) = node.kad_queries.providing_agent_id
+                && id == qid
+            {
+                error!(target: "kademlia_events", "failed to provide wg agent string");
+                node.kad_queries.providing_agent_id = None;
             }
         }
         QueryResult::RepublishRecord(_) => {

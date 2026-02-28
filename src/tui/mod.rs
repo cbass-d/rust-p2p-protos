@@ -125,21 +125,15 @@ impl Tui {
 
                     maybe_event = crossterm_event => {
                         match maybe_event {
-                            Some(Ok(evt)) => {
-                                match evt {
-                                    CrosstermEvent::Key(key) => {
+                            Some(Ok(CrosstermEvent::Key(key))) => {
                                         if key.kind == KeyEventKind::Press {
                                             _event_tx.send(TuiEvent::Key(key)).unwrap();
                                         }
                                     }
-                                    _ => {},
-                                }
-
-                            }
                             Some(Err(_)) => {
                                 _event_tx.send(TuiEvent::Error).unwrap();
                             }
-                            None => {},
+                            _ => {},
                         }
                     }
                     _ = tick_delay => {
@@ -190,7 +184,7 @@ impl Tui {
 
     pub fn suspend(&mut self) -> Result<()> {
         self.exit()?;
-        #[cfg(not(Windows))]
+        #[cfg(not(windows))]
         signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP)?;
         Ok(())
     }
@@ -217,7 +211,7 @@ impl Tui {
 pub fn set_panic_hook() {
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        let _ = restore();
+        restore();
         hook(panic_info);
     }));
 }

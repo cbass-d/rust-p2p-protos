@@ -10,11 +10,7 @@ pub fn handle_event(node: &mut Node, event: identify::Event) -> Result<()> {
         Event::Received { peer_id, info, .. } => {
             debug!(target: "identify_events", "identify recv event {:?}", info);
 
-            let current_peers = {
-                let peers = node.current_peers.read().unwrap();
-
-                peers
-            };
+            let current_peers = { node.current_peers.read().unwrap() };
 
             if info.agent_version == NODE_NETWORK_AGENT && !current_peers.contains(&peer_id) {
                 for addr in info.listen_addrs.into_iter() {

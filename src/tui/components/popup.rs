@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
 
 use color_eyre::eyre::Result;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 use libp2p::PeerId;
 use ratatui::{Frame, layout::Rect};
-use tracing::debug;
 
 use crate::tui::{
     app::Action,
@@ -105,16 +104,16 @@ impl Popup {
 
     pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
-            Action::DisplayManageConnections { peer_id } => {
+            Action::DisplayManageConnections { .. } => {
                 self.set_content(PopUpContent::ManageConnections);
             }
-            Action::DisplayInfo { peer_id } => {
+            Action::DisplayInfo { .. } => {
                 self.set_content(PopUpContent::NodeInfo);
             }
-            Action::DisplayIdentifyInfo { peer_id } => {
+            Action::DisplayIdentifyInfo { .. } => {
                 self.set_content(PopUpContent::IdentifyInfo);
             }
-            Action::DisplayKademliaInfo { peer_id } => {
+            Action::DisplayKademliaInfo { .. } => {
                 self.set_content(PopUpContent::KademliaInfo);
             }
             _ => {}

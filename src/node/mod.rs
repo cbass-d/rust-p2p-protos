@@ -94,6 +94,9 @@ pub struct Node {
     /// Flag for stopping the node
     quit: bool,
 
+    /// Instant when the node started running
+    start: Option<Instant>,
+
     /// Flag for the status of the Kademlia bootstrap process
     bootstrapped: bool,
 
@@ -175,6 +178,7 @@ impl Node {
             quit: false,
             logs: logs.clone(),
             kad_queries: KadQueries::default(),
+            start: None,
             bootstrapped: false,
             swarm,
             identify_info,
@@ -203,6 +207,8 @@ impl Node {
             self.peer_id
         );
 
+        self.start = Some(start);
+
         let _ = network_event_tx
             .send(NetworkEvent::NodeRunning {
                 peer_id: self.peer_id,
@@ -228,7 +234,7 @@ impl Node {
         }
         info!(target: "node", "dialed a total of {} peers", dialed);
 
-        if !self.known_peers.is_empty() {}
+        //if !self.known_peers.is_empty() {}
 
         while !self.quit {
             tokio::select! {
@@ -236,105 +242,15 @@ impl Node {
                     debug!(target: "node", "cancellation token signal received");
                     break;
                 },
-                message = self.from_network.recv() => {
-                    if message.is_none() {
-                        continue;
-                    }
-
-                    let (command, response_tx) = message.unwrap();
-                    if let Some(response) = self.handle_node_command(command) {
-                        response_tx.send(response).unwrap();
-                    }
+                Some(message) = self.from_network.recv() => {
+                    self.handle_network_message(message);
                 },
 
                 Some(event) = self.swarm.next() => {
                     trace!("node swarm event {:?}", event);
                     self.logs.write().unwrap().1.recvd_count += 1;
 
-                    match event {
-                        SwarmEvent::Dialing { peer_id, ..} => {
-                            debug!(target: "node", "dialing peer {:?}", peer_id);
-                        },
-                        SwarmEvent::NewListenAddr { listener_id, address, .. } => {
-                            let local_p2p_addr = address.clone()
-                                    .with_p2p(*self.swarm.local_peer_id()).unwrap();
-                            debug!(target: "node", "listening on p2p address {:?}", local_p2p_addr);
-
-                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::NewListenAddr { listener_id, address }, Instant::now().duration_since(start).as_secs_f32());
-                        },
-                        SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                            debug!(target: "node", "new peer {} from {:?}", peer_id, endpoint);
-
-                            let peer_addr = match endpoint.clone() {
-                                ConnectedPoint::Dialer { address, ..} => address,
-                                ConnectedPoint::Listener { send_back_addr, ..} => send_back_addr,
-                            };
-                            self.swarm.behaviour_mut().kad.add_address(&peer_id, peer_addr);
-
-                            self.current_peers.write().unwrap().insert(peer_id);
-
-                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionEstablished { peer_id }, Instant::now().duration_since(start).as_secs_f32());
-
-                            // Send event of node connections
-                            network_event_tx.send(NetworkEvent::NodesConnected{peer_one: peer_id, peer_two: self.peer_id}).await.unwrap();
-
-                            if !self.bootstrapped {
-                                debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
-                                if let Ok(qid) = self.swarm.behaviour_mut().kad.bootstrap() {
-                                    debug!(target: "kademlia_events", "kademlia bootstrap started");
-                                    self.kad_queries.bootsrap_id = Some(qid);
-                                } else {
-                                    warn!(target: "kademlia_events", "initial kademlia bootstrap failed");
-                                }
-                            }
-                        },
-                        SwarmEvent::ConnectionClosed { peer_id, endpoint, cause, .. } => {
-                            debug!(target: "node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
-
-                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ConnectionClosed { peer_id }, Instant::now().duration_since(start).as_secs_f32());
-
-                            // Send event of nodes disconnecting
-                            network_event_tx.send(NetworkEvent::NodesDisconnected { peer_one: peer_id, peer_two: self.peer_id}).await.unwrap();
-
-                            let mut current_peers = self.current_peers.write().unwrap();
-                            current_peers.remove(&peer_id);
-
-
-                        },
-                        SwarmEvent::ListenerClosed { listener_id, addresses, .. } => {
-                            debug!(target: "node", "listener now closed");
-
-                            self.logs.write().unwrap().0.add_swarm_event(SwarmEventInfo::ListenerClosed { listener_id, addresses }, Instant::now().duration_since(start).as_secs_f32());
-                        }
-                        SwarmEvent::IncomingConnectionError { peer_id, error, ..} => {
-                                error!(target: "node", "incoming connection failed, peer {:?}: {error}", peer_id);
-                        },
-                        SwarmEvent::Behaviour(NodeNetworkEvent::Identify(event)) => {
-                            {
-                                debug!(target: "node", "new identify event been added");
-
-                                let event_string = identify_event_to_string(&event);
-
-                                self.logs.write().unwrap().0.add_identify_event(event_string, Instant::now().duration_since(start).as_secs_f32());
-                            }
-
-                            identify_handler::handle_event(self, event)?;
-
-                        },
-                        SwarmEvent::Behaviour(NodeNetworkEvent::Kademlia(event)) => {
-                            {
-                                debug!(target: "node", "new kademlia event been added");
-                                let event_string = kad_event_to_string(&event);
-
-                                self.logs.write().unwrap().0.add_kademlia_event(event_string, Instant::now().duration_since(start).as_secs_f32());
-                            }
-
-                            kad_handler::handle_event(self, event)?;
-                        },
-                        other => {
-                            debug!("new event: {:?}", other);
-                        }
-                    }
+                    self.handle_swarm_event(event, network_event_tx.clone()).await;
                 },
 
             }
@@ -349,6 +265,160 @@ impl Node {
             .await;
 
         Ok(NodeResult::Success)
+    }
+
+    /// Handle a message coming from the node network
+    fn handle_network_message(&mut self, message: (NodeCommand, oneshot::Sender<NodeResponse>)) {
+        let (command, reply_tx) = message;
+        if let Some(response) = self.handle_node_command(command) {
+            reply_tx.send(response).unwrap();
+        }
+    }
+
+    /// Handles an node libp2p swarm event
+    async fn handle_swarm_event(
+        &mut self,
+        event: SwarmEvent<NodeNetworkEvent>,
+        network_event_tx: mpsc::Sender<NetworkEvent>,
+    ) {
+        let start = self.start.unwrap();
+        match event {
+            SwarmEvent::Dialing { peer_id, .. } => {
+                debug!(target: "node", "dialing peer {:?}", peer_id);
+            }
+            SwarmEvent::NewListenAddr {
+                listener_id,
+                address,
+                ..
+            } => {
+                let local_p2p_addr = address
+                    .clone()
+                    .with_p2p(*self.swarm.local_peer_id())
+                    .unwrap();
+                debug!(target: "node", "listening on p2p address {:?}", local_p2p_addr);
+
+                self.logs.write().unwrap().0.add_swarm_event(
+                    SwarmEventInfo::NewListenAddr {
+                        listener_id,
+                        address,
+                    },
+                    Instant::now().duration_since(start).as_secs_f32(),
+                );
+            }
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => {
+                debug!(target: "node", "new peer {} from {:?}", peer_id, endpoint);
+
+                let peer_addr = match endpoint.clone() {
+                    ConnectedPoint::Dialer { address, .. } => address,
+                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+                };
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(&peer_id, peer_addr);
+
+                self.current_peers.write().unwrap().insert(peer_id);
+
+                self.logs.write().unwrap().0.add_swarm_event(
+                    SwarmEventInfo::ConnectionEstablished { peer_id },
+                    Instant::now().duration_since(start).as_secs_f32(),
+                );
+
+                // Send event of node connections
+                network_event_tx
+                    .send(NetworkEvent::NodesConnected {
+                        peer_one: peer_id,
+                        peer_two: self.peer_id,
+                    })
+                    .await
+                    .unwrap();
+
+                if !self.bootstrapped {
+                    debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
+                    if let Ok(qid) = self.swarm.behaviour_mut().kad.bootstrap() {
+                        debug!(target: "kademlia_events", "kademlia bootstrap started");
+                        self.kad_queries.bootsrap_id = Some(qid);
+                    } else {
+                        warn!(target: "kademlia_events", "initial kademlia bootstrap failed");
+                    }
+                }
+            }
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                endpoint,
+                cause,
+                ..
+            } => {
+                debug!(target: "node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
+
+                self.logs.write().unwrap().0.add_swarm_event(
+                    SwarmEventInfo::ConnectionClosed { peer_id },
+                    Instant::now().duration_since(start).as_secs_f32(),
+                );
+
+                // Send event of nodes disconnecting
+                network_event_tx
+                    .send(NetworkEvent::NodesDisconnected {
+                        peer_one: peer_id,
+                        peer_two: self.peer_id,
+                    })
+                    .await
+                    .unwrap();
+
+                let mut current_peers = self.current_peers.write().unwrap();
+                current_peers.remove(&peer_id);
+            }
+            SwarmEvent::ListenerClosed {
+                listener_id,
+                addresses,
+                ..
+            } => {
+                debug!(target: "node", "listener now closed");
+
+                self.logs.write().unwrap().0.add_swarm_event(
+                    SwarmEventInfo::ListenerClosed {
+                        listener_id,
+                        addresses,
+                    },
+                    Instant::now().duration_since(start).as_secs_f32(),
+                );
+            }
+            SwarmEvent::IncomingConnectionError { peer_id, error, .. } => {
+                error!(target: "node", "incoming connection failed, peer {:?}: {error}", peer_id);
+            }
+            SwarmEvent::Behaviour(NodeNetworkEvent::Identify(event)) => {
+                {
+                    debug!(target: "node", "new identify event been added");
+
+                    let event_string = identify_event_to_string(&event);
+
+                    self.logs.write().unwrap().0.add_identify_event(
+                        event_string,
+                        Instant::now().duration_since(start).as_secs_f32(),
+                    );
+                }
+
+                identify_handler::handle_event(self, event);
+            }
+            SwarmEvent::Behaviour(NodeNetworkEvent::Kademlia(event)) => {
+                {
+                    debug!(target: "node", "new kademlia event been added");
+                    let event_string = kad_event_to_string(&event);
+
+                    self.logs.write().unwrap().0.add_kademlia_event(
+                        event_string,
+                        Instant::now().duration_since(start).as_secs_f32(),
+                    );
+                }
+
+                kad_handler::handle_event(self, event);
+            }
+            other => {
+                debug!("new event: {:?}", other);
+            }
+        }
     }
 
     /// Handles an incoming node command from the node network, returns the NodeResponse if any
@@ -482,9 +552,9 @@ mod tests {
         // Validate the new node is in the proper state
         assert!(!node.is_bootstrapped());
         assert!(!node.quit);
-        assert!(node.current_peers.read().unwrap().len() == 0);
-        assert!(node.known_peers.len() == 0);
-        assert!(node.logs.read().unwrap().0.all_messages().len() == 0);
+        assert!(node.current_peers.read().unwrap().is_empty());
+        assert!(node.known_peers.is_empty());
+        assert!(node.logs.read().unwrap().0.all_messages().is_empty());
         assert!(node.logs.read().unwrap().1.recvd_count == 0);
         assert!(node.logs.read().unwrap().1.sent_count == 0);
 

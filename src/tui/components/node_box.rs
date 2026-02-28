@@ -6,15 +6,15 @@ use std::{
 
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
-use libp2p::{PeerId, core::connection};
+use libp2p::PeerId;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::{Color, Style},
+    style::Color,
     symbols::Marker,
     widgets::{
-        Block, Borders, List, ListState, Widget,
-        canvas::{Canvas, Circle, Line, Map, MapResolution, Rectangle},
+        Block, Borders, ListState, Widget,
+        canvas::{Canvas, Circle, Line},
     },
 };
 use tracing::{debug, trace};
@@ -51,11 +51,19 @@ pub struct NodeBox {
     /// Hashmap representing the connections between the nodes
     node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
+    /// X bound for the canvas
     x_bound: f64,
+
+    /// Y bound for the canvas
     y_bound: f64,
 
+    /// Cordinataes for each of the nodes
     node_coords: HashMap<PeerId, NodeCoords>,
+
+    /// ratatui Circles for each of the nodes
     node_shapes: HashMap<PeerId, Circle>,
+
+    /// The lines connecting each of the nodes/circles
     lines: HashMap<(PeerId, PeerId), Line>,
 }
 
@@ -201,11 +209,10 @@ impl NodeBox {
 
         debug!(target: "node_box", "attempting to connect {peer_one} and {peer_two}");
 
-        if circle_one.is_some() && circle_two.is_some() {
+        if let Some(circle_one) = circle_one
+            && let Some(circle_two) = circle_two
+        {
             debug!(target: "node_box", "two nodes being connected on graph {peer_one} {peer_two}");
-
-            let circle_one = circle_one.unwrap();
-            let circle_two = circle_two.unwrap();
 
             // Draw the line endpoints on the border of the circle
             // rather than the center
@@ -237,7 +244,7 @@ impl NodeBox {
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        _actions: &mut VecDeque<Action>,
     ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {

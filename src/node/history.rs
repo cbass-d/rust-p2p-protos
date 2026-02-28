@@ -1,7 +1,5 @@
 use libp2p::{
-    Multiaddr, PeerId,
-    core::{ConnectedPoint, transport::ListenerId},
-    identify::Event as IdentifyEvent,
+    Multiaddr, PeerId, core::transport::ListenerId, identify::Event as IdentifyEvent,
     kad::Event as KadEvent,
 };
 use ratatui::{
@@ -71,7 +69,7 @@ impl MessageHistory {
         self.identify
             .iter()
             .map(|(m, t)| {
-                let line = Line::from(vec![
+                Line::from(vec![
                     Span::styled(
                         format!("{}s", t),
                         Style::new().add_modifier(Modifier::UNDERLINED),
@@ -86,9 +84,7 @@ impl MessageHistory {
                     ),
                     Span::raw(" "),
                     Span::raw(m),
-                ]);
-
-                line
+                ])
             })
             .collect()
     }
@@ -98,7 +94,7 @@ impl MessageHistory {
         self.kademlia
             .iter()
             .map(|(m, t)| {
-                let line = Line::from(vec![
+                Line::from(vec![
                     Span::styled(
                         format!("{}s", t),
                         Style::new().add_modifier(Modifier::UNDERLINED),
@@ -113,9 +109,7 @@ impl MessageHistory {
                     ),
                     Span::raw(" "),
                     Span::raw(m),
-                ]);
-
-                line
+                ])
             })
             .collect()
     }
@@ -125,7 +119,7 @@ impl MessageHistory {
         self.swarm
             .iter()
             .map(|(m, t)| {
-                let line = Line::from(vec![
+                Line::from(vec![
                     Span::styled(
                         format!("{}s", t),
                         Style::new().add_modifier(Modifier::UNDERLINED),
@@ -140,9 +134,7 @@ impl MessageHistory {
                     ),
                     Span::raw(" "),
                     Span::raw(format_swarm_event_to_string(m)),
-                ]);
-
-                line
+                ])
             })
             .collect()
     }
@@ -226,7 +218,7 @@ pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
         IdentifyEvent::Received {
             connection_id,
             peer_id,
-            info,
+            ..
         } => {
             format!(
                 "RECIEVED Identification information from {} ({})",
@@ -236,7 +228,7 @@ pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
         IdentifyEvent::Pushed {
             connection_id,
             peer_id,
-            info,
+            ..
         } => {
             format!(
                 "PUSHED Identification information to {} ({})",
@@ -269,11 +261,7 @@ pub fn kad_event_to_string(event: &KadEvent) -> String {
             format!("INBOUND REQUEST {:?}", request)
         }
         KadEvent::RoutingUpdated {
-            peer,
-            is_new_peer,
-            addresses,
-            bucket_range,
-            old_peer,
+            peer, is_new_peer, ..
         } => {
             if *is_new_peer {
                 format!("ROUTING UPDATED Routing for new peer {} updated", peer)
@@ -284,18 +272,13 @@ pub fn kad_event_to_string(event: &KadEvent) -> String {
         KadEvent::UnroutablePeer { peer } => {
             format!("UNROUTABLE Peer {} is unroutable", peer)
         }
-        KadEvent::PendingRoutablePeer { peer, address } => {
+        KadEvent::PendingRoutablePeer { peer, .. } => {
             format!(
                 "PENIDNG ROUTE Connection to peer {} established, pednding addition to table",
                 peer
             )
         }
-        KadEvent::OutboundQueryProgressed {
-            id,
-            result,
-            stats,
-            step,
-        } => {
+        KadEvent::OutboundQueryProgressed { id, .. } => {
             format!(
                 "OUTBOUD QUERY PROGRESSES Outbound query {} has progressed",
                 id
@@ -370,13 +353,15 @@ mod tests {
 
     #[test]
     fn test_format_dialing() {
-        let peer_id = Some(random_peer_id());
-        let event = SwarmEventInfo::Dialing { peer_id };
+        let peer_id = random_peer_id();
+        let event = SwarmEventInfo::Dialing {
+            peer_id: Some(peer_id),
+        };
 
         let formatted = format_swarm_event_to_string(&event);
 
         assert!(formatted.starts_with("DIALING"));
-        assert!(formatted.contains(&peer_id.unwrap().to_string()));
+        assert!(formatted.contains(&peer_id.to_string()));
     }
 
     #[test]
