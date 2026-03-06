@@ -10,7 +10,7 @@ use tracing::debug;
 
 /// Wrappers for libp2p Swarm events for easier handling and formatting
 #[derive(Debug, Clone)]
-pub enum SwarmEventInfo {
+pub(crate) enum SwarmEventInfo {
     ConnectionEstablished {
         peer_id: PeerId,
     },
@@ -35,7 +35,7 @@ pub enum SwarmEventInfo {
 
 /// Container for the swarm events a node has seen separated by protocol. Includes a timestamp
 #[derive(Default, Debug, Clone)]
-pub struct MessageHistory {
+pub(crate) struct MessageHistory {
     pub identify: Vec<(String, String)>,
     pub kademlia: Vec<(String, String)>,
     pub swarm: Vec<(SwarmEventInfo, String)>,

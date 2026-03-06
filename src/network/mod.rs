@@ -11,7 +11,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent, NodeCommand, NodeResponse},
-    node::{Node, NodeResult},
+    node::{NodeResult, configured::ConfiguredNode},
 };
 
 // A mock network through which the nodes communicate.
@@ -19,7 +19,7 @@ use crate::{
 // The network maintains its own mpsc channel where it recieves messages
 // from nodes to pass/forward to the destination node found in the message.
 #[derive(Debug)]
-pub struct NodeNetwork {
+pub(crate) struct NodeNetwork {
     /// Mapping from peer id to mpsc channel for sending commands to node
     nodes: HashMap<PeerId, mpsc::Sender<(NodeCommand, oneshot::Sender<NodeResponse>)>>,
 
@@ -56,10 +56,16 @@ impl NodeNetwork {
 
     /// Builds and adds a new node into the network. Returns a Node or an Err when building the
     /// new node fails
-    pub fn add_node(&mut self) -> Result<Node> {
-        let (node, tx, listen_adrress) = Node::new()?;
-        self.nodes.insert(node.peer_id, tx);
-        self.addresses.insert(node.peer_id, listen_adrress);
+    pub fn add_node(&mut self) -> Result<ConfiguredNode> {
+        // Every node will be able to send network events and will have
+        // a cancellation token to know when to stop
+        let _network_event_tx = self.network_event_tx.clone();
+        let _canceallation_token = self.cancellation_token.clone();
+        let (node, tx) = ConfiguredNode::new(_canceallation_token, _network_event_tx);
+        let listen_address = node.base.listen_address.clone();
+        let peer_id = node.base.peer_id;
+        self.nodes.insert(peer_id, tx);
+        self.addresses.insert(peer_id, listen_address);
 
         Ok(node)
     }
@@ -80,17 +86,16 @@ impl NodeNetwork {
         // Create and run the requested number of nodes
         for _ in 0..number_of_nodes {
             // Store the nodes Multiaddress for connecting the nodes in the future
-            let mut node = self.add_node()?;
+            let node = self.add_node()?;
 
             // Every node will be able to send network events and will have
             // a cancellation token to know when to stop
             let _network_event_tx = self.network_event_tx.clone();
             let _canceallation_token = self.cancellation_token.clone();
 
-            let network_start = self.network_start;
             node_task_set.spawn(async move {
-                node.run(network_start, _network_event_tx, _canceallation_token)
-                    .await
+                let mut running_node = node.start();
+                running_node.run().await
             });
 
             debug!(target: "node_network", "new node task spawned");
@@ -218,21 +223,21 @@ impl NodeNetwork {
             NetworkCommand::StartNode => {
                 // We limit the amount of nodes to 10
                 if self.nodes.len() >= 10 {
+                    self.network_event_tx.send(NetworkEvent::MaxNodes).await;
                     return node_task_set;
                 }
 
                 // Store the nodes Multiaddress for connecting the nodes in the future
-                let mut node = self.add_node().unwrap();
+                let node = self.add_node().unwrap();
 
                 // Every node will be able to send network events and will have
                 // a cancellation token to know when to stop
                 let _network_event_tx = self.network_event_tx.clone();
                 let _canceallation_token = self.cancellation_token.clone();
 
-                let network_start = self.network_start;
                 node_task_set.spawn(async move {
-                    node.run(network_start, _network_event_tx, _canceallation_token)
-                        .await
+                    let mut running_node = node.start();
+                    running_node.run().await
                 });
 
                 debug!(target: "node_network", "new node task spawned");
@@ -271,8 +276,30 @@ mod tests {
 
         let node = node_network.add_node().unwrap();
 
-        assert!(node_network.nodes.contains_key(&node.peer_id));
-        assert!(node_network.addresses.contains_key(&node.peer_id));
+        assert!(node_network.nodes.contains_key(&node.base.peer_id));
+        assert!(node_network.addresses.contains_key(&node.base.peer_id));
+    }
+
+    #[tokio::test]
+    async fn test_max_nodes() {
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(10);
+        let cancellation_token = CancellationToken::new();
+        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token);
+
+        let (network_command_tx, network_command_rx) = mpsc::channel(10);
+        let _task = tokio::spawn(async move {
+            let _ = node_network.run(10, network_command_rx).await;
+        });
+
+        network_command_tx
+            .send(NetworkCommand::StartNode)
+            .await
+            .unwrap();
+
+        while let Some(event) = network_event_rx.recv().await {
+            assert!(matches!(event, NetworkEvent::MaxNodes));
+            break;
+        }
     }
 
     #[tokio::test]

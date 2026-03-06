@@ -10,7 +10,7 @@ use crate::node::info::{IdentifyInfo, KademliaInfo};
 
 /// Event emitted by the Node Network
 #[derive(Debug)]
-pub enum NetworkEvent {
+pub(crate) enum NetworkEvent {
     /// A new node has started running
     NodeRunning {
         peer_id: PeerId,
@@ -32,11 +32,14 @@ pub enum NetworkEvent {
 
     /// The kademlia info for a node
     KademliaInfo { info: KademliaInfo },
+
+    /// Max number of nodes reached
+    MaxNodes,
 }
 
 /// A network command sent from the TUI to the Node Network
 #[derive(Debug)]
-pub enum NetworkCommand {
+pub(crate) enum NetworkCommand {
     /// Start a new node in the network
     StartNode,
 
@@ -58,7 +61,7 @@ pub enum NetworkCommand {
 
 /// A command sent to a node from the node network
 #[derive(Debug)]
-pub enum NodeCommand {
+pub(crate) enum NodeCommand {
     /// Establish a connection with the requested peer
     ConnectTo { peer: Multiaddr },
 
@@ -77,7 +80,7 @@ pub enum NodeCommand {
 
 /// The response a node sends back after receiving a NodeCommand
 #[derive(Debug, PartialEq)]
-pub enum NodeResponse {
+pub(crate) enum NodeResponse {
     /// Local identify info
     IdentifyInfo { info: IdentifyInfo },
 

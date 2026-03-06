@@ -2,11 +2,10 @@ mod cli;
 mod messages;
 mod network;
 mod node;
-mod tests;
 mod tui;
 
 use clap::Parser;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, eyre};
 use network::NodeNetwork;
 use tokio::task::JoinSet;
 use tracing::{info, instrument};
@@ -43,6 +42,10 @@ async fn main() -> Result<()> {
 
     let args = CliArgs::parse();
     let number_of_nodes = args.nodes;
+
+    if number_of_nodes > 10 {
+        return Err(eyre!("Max number of nodes is 10!"));
+    }
 
     // The task set will hold the TUI taks and the node network tasks
     // Using task set makes it easier to manage the waiting on tasks to finish

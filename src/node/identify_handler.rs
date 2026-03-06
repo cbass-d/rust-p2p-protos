@@ -2,10 +2,10 @@ use color_eyre::eyre::Result;
 use libp2p::identify::{self, Event};
 use tracing::{debug, info, warn};
 
-use crate::node::{NODE_NETWORK_AGENT, Node};
+use crate::node::{NODE_NETWORK_AGENT, running::RunningNode};
 
 /// Handle an incoming identify event
-pub fn handle_event(node: &mut Node, event: identify::Event) -> Result<()> {
+pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Result<()> {
     match event {
         Event::Received { peer_id, info, .. } => {
             debug!(target: "identify_events", "identify recv event {:?}", info);
@@ -14,7 +14,7 @@ pub fn handle_event(node: &mut Node, event: identify::Event) -> Result<()> {
 
             if info.agent_version == NODE_NETWORK_AGENT && !current_peers.contains(&peer_id) {
                 for addr in info.listen_addrs.into_iter() {
-                    if node.swarm.dial(addr.clone()).is_ok() {
+                    if node.base.swarm.dial(addr.clone()).is_ok() {
                         info!(target: "swarm_events", "dialed peer {addr} from identify recv");
 
                         let mut peers = node.current_peers.write().unwrap();
@@ -33,7 +33,7 @@ pub fn handle_event(node: &mut Node, event: identify::Event) -> Result<()> {
         }
         Event::Error { peer_id, error, .. } => match error {
             libp2p::swarm::StreamUpgradeError::Timeout => {
-                node.swarm.behaviour_mut().kad.remove_peer(&peer_id);
+                node.base.swarm.behaviour_mut().kad.remove_peer(&peer_id);
             }
             _ => {
                 debug!(target: "identify_events", "identify error: {error}");

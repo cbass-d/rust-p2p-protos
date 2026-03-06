@@ -5,18 +5,18 @@ use libp2p::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::node::{NODE_NETWORK_AGENT, Node};
+use crate::node::{NODE_NETWORK_AGENT, running::RunningNode};
 
 /// Keeping track of important kademlia queries
 #[derive(Default, Debug)]
-pub struct KadQueries {
+pub(crate) struct KadQueries {
     pub bootsrap_id: Option<QueryId>,
     pub providing_agent_id: Option<QueryId>,
     pub get_providers_id: Option<QueryId>,
 }
 
 /// Handle an incoming kademlia event
-pub fn handle_event(node: &mut Node, event: kad::Event) -> Result<()> {
+pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<()> {
     match event {
         kad::Event::InboundRequest { request } => {
             on_inbound_req(node, request);
@@ -40,7 +40,7 @@ pub fn handle_event(node: &mut Node, event: kad::Event) -> Result<()> {
         kad::Event::ModeChanged { new_mode } => {
             info!(target: "kademlia_events", "node mode changed to {new_mode}");
 
-            node.kad_info.set_mode(new_mode);
+            node.base.kad_info.set_mode(new_mode);
         }
         other => {
             debug!("some other kad event: {:?}", other);
@@ -50,7 +50,7 @@ pub fn handle_event(node: &mut Node, event: kad::Event) -> Result<()> {
 }
 
 /// Handle an inbound kadmelia request
-fn on_inbound_req(_node: &mut Node, request: InboundRequest) {
+fn on_inbound_req(_node: &mut RunningNode, request: InboundRequest) {
     match request {
         InboundRequest::FindNode { .. } => {}
         InboundRequest::GetProvider { .. } => {}
@@ -61,7 +61,7 @@ fn on_inbound_req(_node: &mut Node, request: InboundRequest) {
 }
 
 /// Handle result of kademlia query
-fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: ProgressStep) {
+fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, step: ProgressStep) {
     match result {
         QueryResult::Bootstrap(Ok(res)) => {
             if let Some(qid) = node.kad_queries.bootsrap_id
@@ -70,7 +70,7 @@ fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: Prog
                 if step.last {
                     node.kad_queries.bootsrap_id = None;
                     node.bootstrapped = true;
-                    node.kad_info.set_bootstrapped(true);
+                    node.base.kad_info.set_bootstrapped(true);
 
                     info!(target: "kademlia_events", "kademlia bootstrapped");
 
@@ -87,7 +87,7 @@ fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: Prog
                     // get info about mesh
 
                     let key = RecordKey::new(&NODE_NETWORK_AGENT);
-                    let qid = node.swarm.behaviour_mut().kad.get_providers(key);
+                    let qid = node.base.swarm.behaviour_mut().kad.get_providers(key);
 
                     node.kad_queries.get_providers_id = Some(qid);
                 } else {
@@ -125,7 +125,11 @@ fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: Prog
                             debug!(target: "kademlia_events", "- {provider}");
 
                             // Get other possible/peers providers
-                            node.swarm.behaviour_mut().kad.get_closest_peers(*provider);
+                            node.base
+                                .swarm
+                                .behaviour_mut()
+                                .kad
+                                .get_closest_peers(*provider);
                         }
                         node.kad_queries.get_providers_id = None;
                     }
@@ -135,7 +139,11 @@ fn on_query_result(node: &mut Node, result: QueryResult, id: QueryId, step: Prog
                             debug!(target: "kademlia_events", "- {new_peer}");
 
                             // Get other possible/peers providers
-                            node.swarm.behaviour_mut().kad.get_closest_peers(*new_peer);
+                            node.base
+                                .swarm
+                                .behaviour_mut()
+                                .kad
+                                .get_closest_peers(*new_peer);
                         }
                     }
                 }
