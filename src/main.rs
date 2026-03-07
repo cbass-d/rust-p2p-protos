@@ -1,4 +1,5 @@
 mod cli;
+mod error;
 mod messages;
 mod network;
 mod node;
@@ -12,10 +13,10 @@ use tracing::{info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
 
-use crate::{cli::CliArgs, tui::app::App};
+use crate::{cli::CliArgs, error::AppError, tui::app::App};
 
 /// Initialize tracing for application, uses a rolling log file that refreshes daily
-fn init_tracing() -> Result<WorkerGuard> {
+fn init_tracing() -> Result<WorkerGuard, AppError> {
     // Setup rolling logging to file
     let file_appender = tracing_appender::rolling::daily("logs", "p2p.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
@@ -36,7 +37,7 @@ fn init_tracing() -> Result<WorkerGuard> {
 #[tokio::main]
 #[instrument]
 async fn main() -> Result<()> {
-    color_eyre::install()?;
+    color_eyre::install().expect("failed to setup color_eyre");
 
     let _guard = init_tracing()?;
 
@@ -44,7 +45,7 @@ async fn main() -> Result<()> {
     let number_of_nodes = args.nodes;
 
     if number_of_nodes > 10 {
-        return Err(eyre!("Max number of nodes is 10!"));
+        return Err(AppError::MaxNodes { max: 10 }.into());
     }
 
     // The task set will hold the TUI taks and the node network tasks

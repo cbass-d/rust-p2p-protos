@@ -1,7 +1,8 @@
 use color_eyre::eyre::Result;
+use parking_lot::RwLock;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -165,7 +166,7 @@ impl ManageConnections {
     /// Format the peer list to reflect active connections to be displayed
     fn format_peer_list(&self, peer_list: IndexSet<PeerId>) -> Vec<String> {
         if let Some(node) = self.node {
-            let connected_to = self.node_connections.get(&node).unwrap().read().unwrap();
+            let connected_to = self.node_connections.get(&node).unwrap().read();
             peer_list
                 .iter()
                 .map(|p| {

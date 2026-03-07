@@ -1,5 +1,6 @@
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
+use parking_lot::RwLock;
 use ratatui::{
     Frame,
     layout::{Alignment, Margin, Rect},
@@ -9,10 +10,7 @@ use ratatui::{
         ScrollbarState, Widget,
     },
 };
-use std::{
-    collections::VecDeque,
-    sync::{Arc, RwLock},
-};
+use std::{collections::VecDeque, sync::Arc};
 
 use crate::{
     node::{NodeStats, history::MessageHistory},
@@ -122,7 +120,7 @@ impl NodeLog {
 
         let selected = self.selected.clone().unwrap();
 
-        let messages_and_stats = selected.read().unwrap();
+        let messages_and_stats = selected.read();
 
         let messages = &messages_and_stats.0;
         let stats = &messages_and_stats.1;

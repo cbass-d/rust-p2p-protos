@@ -1,7 +1,8 @@
 use color_eyre::eyre::Result;
+use parking_lot::RwLock;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use crossterm::event::{KeyCode, KeyEvent};

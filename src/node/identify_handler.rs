@@ -10,14 +10,14 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
         Event::Received { peer_id, info, .. } => {
             debug!(target: "identify_events", "identify recv event {:?}", info);
 
-            let current_peers = { node.current_peers.read().unwrap() };
+            let current_peers = { node.current_peers.read() };
 
             if info.agent_version == NODE_NETWORK_AGENT && !current_peers.contains(&peer_id) {
                 for addr in info.listen_addrs.into_iter() {
                     if node.base.swarm.dial(addr.clone()).is_ok() {
                         info!(target: "swarm_events", "dialed peer {addr} from identify recv");
 
-                        let mut peers = node.current_peers.write().unwrap();
+                        let mut peers = node.current_peers.write();
                         peers.insert(peer_id);
                     } else {
                         warn!(target: "swarm_events", "failed to dial peer {addr} from identify recv");

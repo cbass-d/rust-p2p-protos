@@ -1,12 +1,9 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use color_eyre::eyre::Result;
 use futures::StreamExt;
 use libp2p::{Multiaddr, PeerId, Swarm, core::ConnectedPoint, swarm::SwarmEvent};
+use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -100,7 +97,7 @@ impl RunningNode {
 
                 Some(event) = self.base.swarm.next() => {
                     trace!("node swarm event {:?}", event);
-                    self.logs.write().unwrap().1.recvd_count += 1;
+                    self.logs.write().1.recvd_count += 1;
 
                     self.handle_swarm_event(event, self.base.network_event_tx.clone()).await;
                 },
@@ -154,7 +151,7 @@ impl RunningNode {
                     .unwrap();
                 debug!(target: "node", "listening on p2p address {:?}", local_p2p_addr);
 
-                self.logs.write().unwrap().0.add_swarm_event(
+                self.logs.write().0.add_swarm_event(
                     SwarmEventInfo::NewListenAddr {
                         listener_id,
                         address,
@@ -177,9 +174,9 @@ impl RunningNode {
                     .kad
                     .add_address(&peer_id, peer_addr);
 
-                self.current_peers.write().unwrap().insert(peer_id);
+                self.current_peers.write().insert(peer_id);
 
-                self.logs.write().unwrap().0.add_swarm_event(
+                self.logs.write().0.add_swarm_event(
                     SwarmEventInfo::ConnectionEstablished { peer_id },
                     Instant::now().duration_since(start).as_secs_f32(),
                 );
@@ -211,7 +208,7 @@ impl RunningNode {
             } => {
                 debug!(target: "node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
 
-                self.logs.write().unwrap().0.add_swarm_event(
+                self.logs.write().0.add_swarm_event(
                     SwarmEventInfo::ConnectionClosed { peer_id },
                     Instant::now().duration_since(start).as_secs_f32(),
                 );
@@ -225,7 +222,7 @@ impl RunningNode {
                     .await
                     .unwrap();
 
-                let mut current_peers = self.current_peers.write().unwrap();
+                let mut current_peers = self.current_peers.write();
                 current_peers.remove(&peer_id);
             }
             SwarmEvent::ListenerClosed {
@@ -235,7 +232,7 @@ impl RunningNode {
             } => {
                 debug!(target: "node", "listener now closed");
 
-                self.logs.write().unwrap().0.add_swarm_event(
+                self.logs.write().0.add_swarm_event(
                     SwarmEventInfo::ListenerClosed {
                         listener_id,
                         addresses,
@@ -252,7 +249,7 @@ impl RunningNode {
 
                     let event_string = identify_event_to_string(&event);
 
-                    self.logs.write().unwrap().0.add_identify_event(
+                    self.logs.write().0.add_identify_event(
                         event_string,
                         Instant::now().duration_since(start).as_secs_f32(),
                     );
@@ -265,7 +262,7 @@ impl RunningNode {
                     debug!(target: "node", "new kademlia event been added");
                     let event_string = kad_event_to_string(&event);
 
-                    self.logs.write().unwrap().0.add_kademlia_event(
+                    self.logs.write().0.add_kademlia_event(
                         event_string,
                         Instant::now().duration_since(start).as_secs_f32(),
                     );
@@ -298,7 +295,7 @@ impl RunningNode {
                 if self.base.swarm.disconnect_peer_id(peer).is_ok() {
                     debug!(target: "node", "successully disconnected from {peer}");
 
-                    let mut current_peers = self.current_peers.write().unwrap();
+                    let mut current_peers = self.current_peers.write();
                     current_peers.remove(&peer);
                 } else {
                     warn!(target: "node", "failed to disconnect from {peer}");
@@ -328,28 +325,28 @@ impl RunningNode {
     }
     /// Returns the identify messages as strings
     pub fn identify_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().unwrap().0;
+        let messages = &self.logs.read().0;
 
         messages.identify_messages()
     }
 
     /// Returns the kademlia messages as strings
     pub fn kad_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().unwrap().0;
+        let messages = &self.logs.read().0;
 
         messages.kad_messages()
     }
 
     /// Returns the swarm messages as strings
     pub fn swarm_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().unwrap().0;
+        let messages = &self.logs.read().0;
 
         messages.swarm_messages()
     }
 
     /// Returns the all messages as strings
     pub fn all_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().unwrap().0;
+        let messages = &self.logs.read().0;
 
         messages.all_messages()
     }
@@ -386,10 +383,7 @@ impl RunningNode {
 #[cfg(test)]
 mod tests {
     use libp2p::kad::Mode;
-    use tokio::{
-        sync::{mpsc, oneshot},
-        time::Instant,
-    };
+    use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;
 
     use crate::{
@@ -407,11 +401,11 @@ mod tests {
         // Validate the new node is in the proper state
         assert!(!node.is_bootstrapped());
         assert!(!node.quit);
-        assert!(node.current_peers.read().unwrap().is_empty());
+        assert!(node.current_peers.read().is_empty());
         assert!(node.known_peers.is_empty());
-        assert!(node.logs.read().unwrap().0.all_messages().is_empty());
-        assert!(node.logs.read().unwrap().1.recvd_count == 0);
-        assert!(node.logs.read().unwrap().1.sent_count == 0);
+        assert!(node.logs.read().0.all_messages().is_empty());
+        assert!(node.logs.read().1.recvd_count == 0);
+        assert!(node.logs.read().1.sent_count == 0);
 
         assert_eq!(
             node.base.identify_info.public_key.to_peer_id(),

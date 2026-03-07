@@ -1,8 +1,5 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use parking_lot::RwLock;
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use libp2p::{
     Multiaddr, StreamProtocol, Swarm, Transport,

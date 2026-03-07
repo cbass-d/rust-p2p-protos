@@ -7,7 +7,7 @@ use tokio::{
     time::Instant,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent, NodeCommand, NodeResponse},
@@ -61,9 +61,11 @@ impl NodeNetwork {
         // a cancellation token to know when to stop
         let _network_event_tx = self.network_event_tx.clone();
         let _canceallation_token = self.cancellation_token.clone();
+
         let (node, tx) = ConfiguredNode::new(_canceallation_token, _network_event_tx);
         let listen_address = node.base.listen_address.clone();
         let peer_id = node.base.peer_id;
+
         self.nodes.insert(peer_id, tx);
         self.addresses.insert(peer_id, listen_address);
 
@@ -85,14 +87,21 @@ impl NodeNetwork {
 
         // Create and run the requested number of nodes
         for _ in 0..number_of_nodes {
-            // Store the nodes Multiaddress for connecting the nodes in the future
-            let node = self.add_node()?;
+            // Build the new node
+            let node = match self.add_node() {
+                Ok(node) => node,
+                Err(e) => {
+                    warn!(target: "node_network", "failed to build node: {e}");
+                    continue;
+                }
+            };
 
             // Every node will be able to send network events and will have
             // a cancellation token to know when to stop
             let _network_event_tx = self.network_event_tx.clone();
             let _canceallation_token = self.cancellation_token.clone();
 
+            // Run the newly built node
             node_task_set.spawn(async move {
                 let mut running_node = node.start();
                 running_node.run().await

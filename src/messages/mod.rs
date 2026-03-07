@@ -1,5 +1,6 @@
+use parking_lot::RwLock;
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use libp2p::Multiaddr;
 use libp2p::PeerId;
