@@ -26,6 +26,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
+use crate::{error::AppError, tui::app::App};
+
 /// Events originating from the user interacting with the TUI
 /// as well as tick and render events
 pub(crate) enum TuiEvent {
@@ -54,10 +56,11 @@ pub(crate) struct Tui {
 }
 
 impl Tui {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, AppError> {
         let tick_rate = 4.0;
         let frame_rate = 60.0;
-        let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+        let terminal = Terminal::new(CrosstermBackend::new(stdout()))
+            .map_err(|e| AppError::TuiInit(e.to_string()))?;
         let (tui_event_tx, tui_event_rx) = mpsc::unbounded_channel();
         let cancellation_token = CancellationToken::new();
         let task = tokio::spawn(async {});
@@ -147,7 +150,7 @@ impl Tui {
         });
     }
 
-    pub fn stop(&self) -> Result<()> {
+    pub fn stop(&self) -> Result<(), AppError> {
         self.cancel();
         let mut counter = 0;
 
@@ -170,14 +173,15 @@ impl Tui {
         self.cancellation_token.cancel();
     }
 
-    pub fn enter(&mut self) -> Result<()> {
-        crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
+    pub fn enter(&mut self) -> Result<(), AppError> {
+        crossterm::terminal::enable_raw_mode().map_err(|e| AppError::TuiInit(e.to_string()))?;
+        crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)
+            .map_err(|e| AppError::TuiInit(e.to_string()))?;
         self.start();
         Ok(())
     }
 
-    pub fn resume(&mut self) -> Result<()> {
+    pub fn resume(&mut self) -> Result<(), AppError> {
         self.enter()?;
         Ok(())
     }
@@ -193,13 +197,17 @@ impl Tui {
         self.tui_event_rx.recv().await
     }
 
-    pub fn exit(&mut self) -> Result<()> {
+    pub fn exit(&mut self) -> Result<(), AppError> {
         self.stop()?;
 
         // Clean up the terminal environment
-        if crossterm::terminal::is_raw_mode_enabled()? {
-            crossterm::execute!(stdout(), LeaveAlternateScreen, cursor::Show)?;
-            crossterm::terminal::disable_raw_mode()?;
+        if crossterm::terminal::is_raw_mode_enabled()
+            .map_err(|e| AppError::OtherTUI(e.to_string()))?
+        {
+            crossterm::execute!(stdout(), LeaveAlternateScreen, cursor::Show)
+                .map_err(|e| AppError::OtherTUI(e.to_string()))?;
+            crossterm::terminal::disable_raw_mode()
+                .map_err(|e| AppError::OtherTUI(e.to_string()))?;
         }
 
         Ok(())

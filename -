@@ -9,7 +9,7 @@ use clap::Parser;
 use color_eyre::eyre::{Result, eyre};
 use network::NodeNetwork;
 use tokio::task::JoinSet;
-use tracing::{error, info, instrument};
+use tracing::{info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
 
@@ -79,9 +79,7 @@ async fn main() -> Result<()> {
             Err(e) if e.id() == app_task.id() => {
                 error!("Node network task failed to complete: {e}");
             }
-            Err(e) if e.id() == network_task.id() => {
-                error!("TUI app task failed to complete: {e}");
-            }
+            Err(e) if e.id() == network_task.id() => {}
             _ => {}
         }
     }

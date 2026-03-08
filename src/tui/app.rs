@@ -1,6 +1,7 @@
 use parking_lot::RwLock;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    error::Error,
     sync::Arc,
 };
 
@@ -16,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 
 use crate::{
+    error::AppError,
     messages::{NetworkCommand, NetworkEvent},
     node::{NodeStats, history::MessageHistory},
     tui::{
@@ -177,7 +179,7 @@ impl App {
 
     /// The main logic for the TUI application
     #[instrument(skip_all, name = "TUI")]
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<(), AppError> {
         // Create and enter TUI terminal environment
         let mut tui = Tui::new()?.tick_rate(4.0).frame_rate(30.0);
 
@@ -188,7 +190,9 @@ impl App {
         self.node_box.focus(true);
 
         loop {
-            tui.terminal.draw(|frame| self.render_frame(frame))?;
+            tui.terminal
+                .draw(|frame| self.render_frame(frame))
+                .map_err(|e| AppError::TerminalDraw(e.to_string()))?;
 
             let mut new_actions = VecDeque::new();
 

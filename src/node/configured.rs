@@ -2,7 +2,7 @@ use parking_lot::RwLock;
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use libp2p::{
-    Multiaddr, StreamProtocol, Swarm, Transport,
+    Multiaddr, Swarm, Transport,
     core::transport::{MemoryTransport, upgrade},
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     identity,
@@ -16,9 +16,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    error::AppError,
     messages::{NetworkEvent, NodeCommand, NodeResponse},
     node::{
-        NodeStats,
+        IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError, NodeStats,
         base::NodeBase,
         behaviour::NodeBehaviour,
         history::MessageHistory,
@@ -27,10 +28,6 @@ use crate::{
         running::RunningNode,
     },
 };
-
-const IPFS_KAD_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
-const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
-const NODE_NETWORK_AGENT: &str = "node-network/0.1";
 
 /// A node with libp2p swarm configured
 pub(crate) struct ConfiguredNode {
@@ -45,10 +42,13 @@ impl ConfiguredNode {
     pub fn new(
         cancellation_token: CancellationToken,
         network_event_tx: mpsc::Sender<NetworkEvent>,
-    ) -> (
-        Self,
-        mpsc::Sender<(NodeCommand, oneshot::Sender<NodeResponse>)>,
-    ) {
+    ) -> Result<
+        (
+            Self,
+            mpsc::Sender<(NodeCommand, oneshot::Sender<NodeResponse>)>,
+        ),
+        NodeError,
+    > {
         // Build the mpsc channel where the channel will be recieving messages from
         let (tx, rx) = mpsc::channel(100);
 
@@ -56,7 +56,9 @@ impl ConfiguredNode {
         let peer_id = node_keys.public().to_peer_id();
         let node_transport = MemoryTransport::default()
             .upgrade(upgrade::Version::V1)
-            .authenticate(noise::Config::new(&node_keys).expect("noise config failed"))
+            .authenticate(
+                noise::Config::new(&node_keys).map_err(|e| NodeError::Config(e.to_string()))?,
+            )
             .multiplex(yamux::Config::default())
             .boxed();
 
@@ -104,7 +106,7 @@ impl ConfiguredNode {
             known_peers: vec![],
         };
 
-        (node, tx)
+        Ok((node, tx))
     }
 
     /// Transitions from ConfiguredNode to a RunningNode instance consuming itself
@@ -112,6 +114,7 @@ impl ConfiguredNode {
         RunningNode {
             base: self.base,
             quit: false,
+            killed: false,
             start: Instant::now(),
             logs: Arc::new(RwLock::new((
                 MessageHistory::default(),

@@ -7,9 +7,10 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    error::AppError,
     messages::{NetworkEvent, NodeCommand, NodeResponse},
     node::{
-        NodeResult, NodeStats,
+        NodeError, NodeResult, NodeStats,
         base::NodeBase,
         behaviour::NodeNetworkEvent,
         history::{MessageHistory, SwarmEventInfo, identify_event_to_string, kad_event_to_string},
@@ -27,6 +28,9 @@ pub(crate) struct RunningNode {
 
     /// Flag for stopping the node
     pub(crate) quit: bool,
+
+    /// Node killed by network command
+    pub(crate) killed: bool,
 
     /// Instant when the node started running
     pub(crate) start: Instant,
@@ -50,7 +54,7 @@ pub(crate) struct RunningNode {
 impl RunningNode {
     /// Main run loop of for the node
     #[instrument(skip_all, fields(id = %self.base.peer_id), name = "run node")]
-    pub async fn run(&mut self) -> Result<NodeResult> {
+    pub async fn run(&mut self) -> Result<NodeResult, NodeError> {
         info!(target: "node",
             "node {} now running",
             self.base.peer_id
@@ -71,7 +75,8 @@ impl RunningNode {
 
         self.base
             .swarm
-            .listen_on(self.base.listen_address.clone())?;
+            .listen_on(self.base.listen_address.clone())
+            .map_err(|e| NodeError::ListenFailed(e.to_string()))?;
 
         info!(target: "node", "node swarm listening on {}", self.base.listen_address);
 
@@ -86,6 +91,7 @@ impl RunningNode {
                 warn!(target: "node", "failed to dial peer {addr}");
             }
         }
+
         info!(target: "node", "dialed a total of {} peers", dialed);
 
         while !self.quit {
@@ -98,13 +104,17 @@ impl RunningNode {
                     self.handle_network_message(message);
                 },
 
-                Some(event) = self.base.swarm.next() => {
-                    trace!("node swarm event {:?}", event);
-                    self.logs.write().1.recvd_count += 1;
+                maybe_event = self.base.swarm.next() => {
+                    if let Some(event) = maybe_event {
+                        trace!("node swarm event {:?}", event);
+                        self.logs.write().1.recvd_count += 1;
 
-                    self.handle_swarm_event(event, self.base.network_event_tx.clone()).await;
+                        self.handle_swarm_event(event, self.base.network_event_tx.clone()).await;
+                    } else {
+                        error!(target: "node", "swarm stream ended");
+                        return Err(NodeError::SwarmStreamEnded);
+                    }
                 },
-
             }
         }
 
@@ -121,7 +131,11 @@ impl RunningNode {
             warn!(target: "node", "failed to send node stopped event: {e}");
         }
 
-        Ok(NodeResult::Success)
+        if self.killed {
+            Ok(NodeResult::Killed)
+        } else {
+            Ok(NodeResult::Success)
+        }
     }
 
     /// Whether the node has completed the Kademlia bootstrap process
@@ -334,6 +348,7 @@ impl RunningNode {
                 debug!(target: "node", "stop command received");
 
                 self.quit = true;
+                self.killed = true;
 
                 None
             }
@@ -411,7 +426,7 @@ mod tests {
     fn test_new_node() {
         let cancellation_token = CancellationToken::new();
         let (tx, _) = mpsc::channel::<NetworkEvent>(1);
-        let (configured_node, _) = ConfiguredNode::new(cancellation_token, tx);
+        let (configured_node, _) = ConfiguredNode::new(cancellation_token, tx).unwrap();
         let node = configured_node.start();
 
         // Validate the new node is in the proper state
@@ -436,7 +451,7 @@ mod tests {
     async fn test_handle_get_kad_info() {
         let cancellation_token = CancellationToken::new();
         let (tx, _) = mpsc::channel::<NetworkEvent>(1);
-        let (configured_node, command_tx) = ConfiguredNode::new(cancellation_token, tx);
+        let (configured_node, command_tx) = ConfiguredNode::new(cancellation_token, tx).unwrap();
         let mut node = configured_node.start();
         let kad_info = node.base.kad_info.clone();
 
@@ -460,7 +475,7 @@ mod tests {
     async fn test_handle_get_identify_info() {
         let cancellation_token = CancellationToken::new();
         let (tx, _) = mpsc::channel::<NetworkEvent>(1);
-        let (configured_node, command_tx) = ConfiguredNode::new(cancellation_token, tx);
+        let (configured_node, command_tx) = ConfiguredNode::new(cancellation_token, tx).unwrap();
         let mut node = configured_node.start();
         let identify_info = node.base.identify_info.clone();
 

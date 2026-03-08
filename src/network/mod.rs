@@ -7,11 +7,12 @@ use tokio::{
     time::Instant,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
+    error::AppError,
     messages::{NetworkCommand, NetworkEvent, NodeCommand, NodeResponse},
-    node::{NodeResult, configured::ConfiguredNode},
+    node::{NodeError, NodeResult, configured::ConfiguredNode},
 };
 
 // A mock network through which the nodes communicate.
@@ -62,7 +63,7 @@ impl NodeNetwork {
         let _network_event_tx = self.network_event_tx.clone();
         let _canceallation_token = self.cancellation_token.clone();
 
-        let (node, tx) = ConfiguredNode::new(_canceallation_token, _network_event_tx);
+        let (node, tx) = ConfiguredNode::new(_canceallation_token, _network_event_tx)?;
         let listen_address = node.base.listen_address.clone();
         let peer_id = node.base.peer_id;
 
@@ -78,12 +79,12 @@ impl NodeNetwork {
         &mut self,
         number_of_nodes: u8,
         mut network_command_rx: mpsc::Receiver<NetworkCommand>,
-    ) -> Result<()> {
+    ) -> Result<(), AppError> {
         info!(target: "node_network", "node network running with {} nodes", self.nodes.len());
 
         self.network_start = Instant::now();
 
-        let mut node_task_set: JoinSet<Result<NodeResult>> = JoinSet::new();
+        let mut node_task_set: JoinSet<Result<NodeResult, NodeError>> = JoinSet::new();
 
         // Create and run the requested number of nodes
         for _ in 0..number_of_nodes {
@@ -127,9 +128,18 @@ impl NodeNetwork {
         info!(target: "node_network", "network now shutting down...");
 
         // Wait for all the nodes to finish
-        let _ = node_task_set.join_all().await;
+        while let Some(node_result) = node_task_set.join_next().await {
+            match node_result {
+                Ok(result) => {
+                    info!(target: "node_network", "node exited successfully: {result:#?}");
+                }
+                Err(error) => {
+                    error!(target: "node_network", "node exited with error: {error:#?}");
+                }
+            }
+        }
 
-        debug!(target: "node_network", "node tasks ended");
+        debug!(target: "node_network", "all node tasks exited");
 
         Ok(())
     }
@@ -139,8 +149,8 @@ impl NodeNetwork {
     async fn handle_network_command(
         &mut self,
         command: NetworkCommand,
-        mut node_task_set: JoinSet<Result<NodeResult>>,
-    ) -> JoinSet<Result<NodeResult>> {
+        mut node_task_set: JoinSet<Result<NodeResult, NodeError>>,
+    ) -> JoinSet<Result<NodeResult, NodeError>> {
         match command {
             NetworkCommand::ConnectNodes { peer_one, peer_two } => {
                 if let Some(node_channel) = self.nodes.get(&peer_one)

@@ -8,18 +8,31 @@ mod kad_handler;
 pub mod running;
 
 use core::fmt;
-
 use libp2p::StreamProtocol;
+use thiserror::Error;
 
 const IPFS_KAD_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const NODE_NETWORK_AGENT: &str = "node-network/0.1";
 
+/// Errors that occur at the node level
+#[derive(Error, Debug)]
+pub(crate) enum NodeError {
+    #[error("node configuration failed: {0}")]
+    Config(String),
+    #[error("swarm listen failed: {0}")]
+    ListenFailed(String),
+    #[error("node failed to dial peers")]
+    NoPeersDialed,
+    #[error("swarm stream ended unexpectedly")]
+    SwarmStreamEnded,
+}
+
 /// The result after a node has stopped running
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum NodeResult {
     Success,
-    Error(String),
+    Killed,
 }
 
 /// The number of messages/swarm events the node has sent and received
