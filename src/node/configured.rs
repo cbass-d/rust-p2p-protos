@@ -16,7 +16,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    error::AppError,
     messages::{NetworkEvent, NodeCommand, NodeResponse},
     node::{
         IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError, NodeStats,

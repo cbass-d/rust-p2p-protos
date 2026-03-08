@@ -7,7 +7,6 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    error::AppError,
     messages::{NetworkEvent, NodeCommand, NodeResponse},
     node::{
         NodeError, NodeResult, NodeStats,

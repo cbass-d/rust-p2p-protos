@@ -6,7 +6,7 @@ mod node;
 mod tui;
 
 use clap::Parser;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::Result;
 use network::NodeNetwork;
 use tokio::task::JoinSet;
 use tracing::{error, info, instrument};

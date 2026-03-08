@@ -11,7 +11,6 @@ use core::fmt;
 use libp2p::StreamProtocol;
 use thiserror::Error;
 
-const IPFS_KAD_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const NODE_NETWORK_AGENT: &str = "node-network/0.1";
 
@@ -22,8 +21,6 @@ pub(crate) enum NodeError {
     Config(String),
     #[error("swarm listen failed: {0}")]
     ListenFailed(String),
-    #[error("node failed to dial peers")]
-    NoPeersDialed,
     #[error("swarm stream ended unexpectedly")]
     SwarmStreamEnded,
 }
