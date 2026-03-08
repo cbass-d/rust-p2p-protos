@@ -15,7 +15,7 @@ use crate::tui::{
 
 /// What content/component should the Popup display
 #[derive(Debug, Clone, Copy)]
-pub enum PopUpContent {
+pub(crate) enum PopUpContent {
     NodeCommands,
     ManageConnections,
     NodeInfo,
@@ -24,7 +24,7 @@ pub enum PopUpContent {
 }
 
 #[derive(Debug)]
-pub struct Popup {
+pub(crate) struct Popup {
     /// The node for which we are displaying the popup for
     node: Option<PeerId>,
 

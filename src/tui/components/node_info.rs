@@ -15,7 +15,7 @@ use tracing::debug;
 use crate::tui::{app::Action, components::popup::PopUpContent};
 
 #[derive(Debug)]
-pub struct NodeInfo {
+pub(crate) struct NodeInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
@@ -58,40 +58,38 @@ impl NodeInfo {
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
-        match key_event.code {
-            KeyCode::Up => {
-                self.select_previous();
-            }
-            KeyCode::Down => {
-                self.select_next();
-            }
-            KeyCode::Enter => {
-                let selection = self.clamp(self.list_state.selected().unwrap_or(0));
-
-                debug!(target: "node_info", "node commands option {} selected", selection);
-
-                match selection {
-                    0 => {
-                        actions.push_back(Action::DisplayIdentifyInfo {
-                            peer_id: self.node.unwrap(),
-                        });
-                    }
-                    1 => {
-                        actions.push_back(Action::DisplayKademliaInfo {
-                            peer_id: self.node.unwrap(),
-                        });
-                    }
-                    _ => {}
+        if let Some(peer_id) = self.node {
+            match key_event.code {
+                KeyCode::Up => {
+                    self.select_previous();
                 }
+                KeyCode::Down => {
+                    self.select_next();
+                }
+                KeyCode::Enter => {
+                    let selection = self.clamp(self.list_state.selected().unwrap_or(0));
+
+                    debug!(target: "node_info", "node commands option {} selected", selection);
+
+                    match selection {
+                        0 => {
+                            actions.push_back(Action::DisplayIdentifyInfo { peer_id });
+                        }
+                        1 => {
+                            actions.push_back(Action::DisplayKademliaInfo { peer_id });
+                        }
+                        _ => {}
+                    }
+                }
+                // We return back to the node commands when pressing esc (exit)
+                KeyCode::Esc => {
+                    actions.push_back(Action::Popup {
+                        content: PopUpContent::NodeCommands,
+                        peer_id,
+                    });
+                }
+                _ => {}
             }
-            // We return back to the node commands when pressing esc (exit)
-            KeyCode::Esc => {
-                actions.push_back(Action::Popup {
-                    content: PopUpContent::NodeCommands,
-                    peer_id: self.node.unwrap(),
-                });
-            }
-            _ => {}
         }
 
         Ok(())

@@ -18,7 +18,7 @@ use crate::tui::{app::Action, components::popup::PopUpContent};
 /// Consists of a list that can be iterated through by
 /// the user
 #[derive(Debug, Clone)]
-pub struct NodeList {
+pub(crate) struct NodeList {
     /// A IndexSet (a hashset that be accessed using []) of the actively
     /// running nodes that is used to build the list
     active_nodes: IndexSet<PeerId>,

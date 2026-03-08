@@ -13,7 +13,7 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::{
     messages::{NetworkCommand, NetworkEvent},
@@ -31,7 +31,7 @@ use crate::{
 
 /// Determines which of the TUI components is in focus and will take priority in handling user input
 #[derive(Debug, PartialEq)]
-pub enum Focus {
+pub(crate) enum Focus {
     NodeLog,
     NodeList,
     PopUp,
@@ -39,7 +39,7 @@ pub enum Focus {
 
 /// The action to perform as the result of handling user input or from a network event
 #[derive(Debug, Clone)]
-pub enum Action {
+pub(crate) enum Action {
     /// Quit the Application
     Quit,
 
@@ -298,19 +298,25 @@ impl App {
             }
             Action::DisplayIdentifyInfo { peer_id } => {
                 debug!(target: "TUI App", "displaying identify info for node {peer_id}");
-                self.command_tx
+                if let Err(e) = self
+                    .command_tx
                     .send(NetworkCommand::GetIdentifyInfo { peer_id })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "TUI App", "failed to send network command: {e}");
+                }
 
                 self.unfocus_list_graph();
             }
             Action::DisplayKademliaInfo { peer_id } => {
                 debug!(target: "TUI App", "displaying kademlia info for node {peer_id}");
-                self.command_tx
+                if let Err(e) = self
+                    .command_tx
                     .send(NetworkCommand::GetKademliaInfo { peer_id })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "TUI App", "failed to send network command: {e}");
+                }
 
                 self.unfocus_list_graph();
             }
@@ -318,32 +324,40 @@ impl App {
                 self.focus_list_graph();
             }
             Action::ConnectTo { peer_one, peer_two } => {
-                self.command_tx
+                if let Err(e) = self
+                    .command_tx
                     .send(NetworkCommand::ConnectNodes { peer_one, peer_two })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "TUI App", "failed to send network command: {e}");
+                }
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
-                self.command_tx
+                if let Err(e) = self
+                    .command_tx
                     .send(NetworkCommand::DisconectNodes { peer_one, peer_two })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "TUI App", "failed to send network command: {e}");
+                }
             }
             Action::StopNode { peer_id } => {
-                self.command_tx
+                if let Err(e) = self
+                    .command_tx
                     .send(NetworkCommand::StopNode { peer_id })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "TUI App", "failed to send network command: {e}");
+                }
             }
             Action::RemoveNode { .. } => {
                 self.focus_list_graph();
                 self.actions.push_back(Action::CloseNodeCommands);
             }
             Action::StartNode => {
-                self.command_tx
-                    .send(NetworkCommand::StartNode)
-                    .await
-                    .unwrap();
+                if let Err(e) = self.command_tx.send(NetworkCommand::StartNode).await {
+                    warn!(target: "TUI App", "failed to send network command: {e}");
+                }
             }
             Action::Popup { content, peer_id } => {
                 self.popup.set_content(content);
@@ -383,10 +397,9 @@ impl App {
     ) -> Option<Action> {
         match event {
             TuiEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                let _ = self
-                    .handle_key_event(key_event, actions)
-                    .await
-                    .wrap_err_with(|| format!("handling key event failed: {key_event:#?}"));
+                if let Err(e) = self.handle_key_event(key_event, actions).await {
+                    warn!("failed to handle TUI key event: {e}");
+                }
             }
             _ => {}
         };
@@ -491,27 +504,6 @@ impl App {
             };
             self.popup.render(frame, rect);
         }
-        //} else if self.focus == Focus::ManageConnections {
-        //    debug!(target: "TUI", "rendering manage connections");
-
-        //    let rect = Rect {
-        //        x: frame.area().width / 4,
-        //        y: frame.area().height / 3,
-        //        width: frame.area().width / 2,
-        //        height: frame.area().height / 3,
-        //    };
-        //    self.manage_connections.render(frame, rect);
-        //} else if self.focus == Focus::NodeInfo {
-        //    debug!(target: "TUI", "rendering node info");
-
-        //    let rect = Rect {
-        //        x: frame.area().width / 4,
-        //        y: frame.area().height / 3,
-        //        width: frame.area().width / 2,
-        //        height: frame.area().height / 3,
-        //    };
-        //    self.node_info.render(frame, rect);
-        //}
     }
 
     pub fn exit(&mut self) {

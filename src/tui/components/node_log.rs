@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct NodeLog {
+pub(crate) struct NodeLog {
     selected: Option<Arc<RwLock<(MessageHistory, NodeStats)>>>,
     pub list_state: ListState,
     pub scrollbar_state: ScrollbarState,
@@ -118,44 +118,44 @@ impl NodeLog {
             Block::new().title("Node Log").borders(Borders::ALL)
         };
 
-        let selected = self.selected.clone().unwrap();
+        if let Some(selected) = &self.selected {
+            let messages_and_stats = selected.read();
 
-        let messages_and_stats = selected.read();
+            let messages = &messages_and_stats.0;
+            let stats = &messages_and_stats.1;
 
-        let messages = &messages_and_stats.0;
-        let stats = &messages_and_stats.1;
+            let block = block
+                .title_bottom(format!("Total swarm events: {}", stats.recvd_count))
+                .title_alignment(Alignment::Center);
 
-        let block = block
-            .title_bottom(format!("Total swarm events: {}", stats.recvd_count))
-            .title_alignment(Alignment::Center);
+            let all_messages = messages.all_messages_formmatted();
 
-        let all_messages = messages.all_messages_formmatted();
+            self.len = all_messages.len();
 
-        self.len = all_messages.len();
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None);
 
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(None)
-            .end_symbol(None);
+            self.scrollbar_state = self.scrollbar_state.content_length(self.len);
+            self.scrollbar_state = self
+                .scrollbar_state
+                .viewport_content_length(area.height as usize);
 
-        self.scrollbar_state = self.scrollbar_state.content_length(self.len);
-        self.scrollbar_state = self
-            .scrollbar_state
-            .viewport_content_length(area.height as usize);
+            let list = List::new(all_messages)
+                .block(block)
+                .highlight_style(Style::new().underlined())
+                .highlight_symbol("");
 
-        let list = List::new(all_messages)
-            .block(block)
-            .highlight_style(Style::new().underlined())
-            .highlight_symbol("");
-
-        frame.render_stateful_widget(list, area, &mut self.list_state);
-        frame.render_stateful_widget(
-            scrollbar,
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            &mut self.scrollbar_state,
-        );
+            frame.render_stateful_widget(list, area, &mut self.list_state);
+            frame.render_stateful_widget(
+                scrollbar,
+                area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut self.scrollbar_state,
+            );
+        }
     }
 
     pub fn display_logs(&mut self, message_and_stats: Arc<RwLock<(MessageHistory, NodeStats)>>) {

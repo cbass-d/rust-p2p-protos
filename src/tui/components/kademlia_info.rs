@@ -18,7 +18,7 @@ use crate::{
 
 /// Component for displaying info related to the identify protocol
 #[derive(Debug)]
-pub struct KademliaInfo {
+pub(crate) struct KademliaInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
@@ -51,14 +51,16 @@ impl KademliaInfo {
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
-        match key_event.code {
-            KeyCode::Esc => {
-                actions.push_back(Action::Popup {
-                    content: PopUpContent::NodeInfo,
-                    peer_id: self.node.unwrap(),
-                });
+        if let Some(peer_id) = self.node {
+            match key_event.code {
+                KeyCode::Esc => {
+                    actions.push_back(Action::Popup {
+                        content: PopUpContent::NodeInfo,
+                        peer_id,
+                    });
+                }
+                _ => {}
             }
-            _ => {}
         }
 
         Ok(())
@@ -88,13 +90,7 @@ impl KademliaInfo {
         }
 
         // Redner the info is present as a Paragraph
-        if self.info.is_none() {
-            Paragraph::new("--- No info to display ---")
-                .block(block)
-                .alignment(Alignment::Center)
-                .render(area, frame.buffer_mut());
-        } else {
-            let info = self.info.clone().unwrap();
+        if let Some(info) = &self.info {
             let mut lines = Text::from(vec![
                 Line::raw("Node Mode:").style(Style::new().underlined()),
                 Line::from(format!("{}", info.mode)),
@@ -125,6 +121,11 @@ impl KademliaInfo {
             Paragraph::new(lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
+                .render(area, frame.buffer_mut());
+        } else {
+            Paragraph::new("--- No info to display ---")
+                .block(block)
+                .alignment(Alignment::Center)
                 .render(area, frame.buffer_mut());
         }
     }

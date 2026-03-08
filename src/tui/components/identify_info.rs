@@ -18,7 +18,7 @@ use crate::{
 
 /// Component for displaying info related to the identify protocol
 #[derive(Debug)]
-pub struct IdentifyInfo {
+pub(crate) struct IdentifyInfo {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
@@ -51,14 +51,16 @@ impl IdentifyInfo {
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
-        match key_event.code {
-            KeyCode::Esc => {
-                actions.push_back(Action::Popup {
-                    content: PopUpContent::NodeInfo,
-                    peer_id: self.node.unwrap(),
-                });
+        if let Some(peer_id) = self.node {
+            match key_event.code {
+                KeyCode::Esc => {
+                    actions.push_back(Action::Popup {
+                        content: PopUpContent::NodeInfo,
+                        peer_id,
+                    });
+                }
+                _ => {}
             }
-            _ => {}
         }
 
         Ok(())
@@ -87,14 +89,8 @@ impl IdentifyInfo {
             return;
         }
 
-        // Redner the info is present as a Paragraph
-        if self.info.is_none() {
-            Paragraph::new("--- No info to display ---")
-                .block(block)
-                .alignment(Alignment::Center)
-                .render(area, frame.buffer_mut());
-        } else {
-            let info = self.info.clone().unwrap();
+        // Render the info is present as a Paragraph
+        if let Some(info) = &self.info {
             let lines = Text::from(vec![
                 Line::raw("Peer Id:").style(Style::new().underlined()),
                 Line::from(info.public_key.to_peer_id().to_string()),
@@ -108,6 +104,11 @@ impl IdentifyInfo {
             Paragraph::new(lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
+                .render(area, frame.buffer_mut());
+        } else {
+            Paragraph::new("--- No info to display ---")
+                .block(block)
+                .alignment(Alignment::Center)
                 .render(area, frame.buffer_mut());
         }
     }

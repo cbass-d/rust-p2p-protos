@@ -22,7 +22,7 @@ use crate::tui::{app::Action, components::popup::PopUpContent};
 /// Component for managing the connections for a node in the network. Connections can be
 /// established or deleted.
 #[derive(Debug)]
-pub struct ManageConnections {
+pub(crate) struct ManageConnections {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
@@ -77,41 +77,45 @@ impl ManageConnections {
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
-        match key_event.code {
-            KeyCode::Up => {
-                self.select_previous();
-            }
-            KeyCode::Down => {
-                self.select_next();
-            }
-            KeyCode::Char('c') => {
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-
-                debug!(target: "manage_connections", "connecting to peer: {}", self.active_nodes[node_idx]);
-
-                if let Some(peer_one) = self.node {
-                    let peer_two = self.active_nodes[node_idx];
-                    actions.push_back(Action::ConnectTo { peer_one, peer_two });
+        if let Some(peer_id) = self.node {
+            match key_event.code {
+                KeyCode::Up => {
+                    self.select_previous();
                 }
-            }
-            KeyCode::Char('d') => {
-                let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-
-                debug!(target: "manage_connections", "disconnecting from peer: {}", self.active_nodes[node_idx]);
-
-                if let Some(peer_one) = self.node {
-                    let peer_two = self.active_nodes[node_idx];
-                    actions.push_back(Action::DisconnectFrom { peer_one, peer_two });
+                KeyCode::Down => {
+                    self.select_next();
                 }
+                KeyCode::Char('c') => {
+                    let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+
+                    debug!(target: "manage_connections", "connecting to peer: {}", self.active_nodes[node_idx]);
+
+                    let peer_two = self.active_nodes[node_idx];
+                    actions.push_back(Action::ConnectTo {
+                        peer_one: peer_id,
+                        peer_two,
+                    });
+                }
+                KeyCode::Char('d') => {
+                    let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+
+                    debug!(target: "manage_connections", "disconnecting from peer: {}", self.active_nodes[node_idx]);
+
+                    let peer_two = self.active_nodes[node_idx];
+                    actions.push_back(Action::DisconnectFrom {
+                        peer_one: peer_id,
+                        peer_two,
+                    });
+                }
+                // We return back to the node commands when pressing esc (exit)
+                KeyCode::Esc => {
+                    actions.push_back(Action::Popup {
+                        content: PopUpContent::NodeCommands,
+                        peer_id,
+                    });
+                }
+                _ => {}
             }
-            // We return back to the node commands when pressing esc (exit)
-            KeyCode::Esc => {
-                actions.push_back(Action::Popup {
-                    content: PopUpContent::NodeCommands,
-                    peer_id: self.node.unwrap(),
-                });
-            }
-            _ => {}
         }
 
         Ok(())
@@ -165,21 +169,22 @@ impl ManageConnections {
 
     /// Format the peer list to reflect active connections to be displayed
     fn format_peer_list(&self, peer_list: IndexSet<PeerId>) -> Vec<String> {
-        if let Some(node) = self.node {
-            let connected_to = self.node_connections.get(&node).unwrap().read();
-            peer_list
-                .iter()
-                .map(|p| {
-                    if connected_to.contains(p) {
-                        format!("[*] {}", p)
-                    } else {
-                        format!("[ ] {}", p)
-                    }
-                })
-                .collect::<Vec<String>>()
-        } else {
-            vec![]
-        }
+        self.node
+            .and_then(|node| self.node_connections.get(&node))
+            .map(|connections| {
+                let connections = connections.read();
+                peer_list
+                    .iter()
+                    .map(|p| {
+                        if connections.contains(p) {
+                            format!("[*] {}", p)
+                        } else {
+                            format!("[ ] {}", p)
+                        }
+                    })
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default()
     }
 
     pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {

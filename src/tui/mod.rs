@@ -28,7 +28,7 @@ use tracing::debug;
 
 /// Events originating from the user interacting with the TUI
 /// as well as tick and render events
-pub enum TuiEvent {
+pub(crate) enum TuiEvent {
     Init,
     Quit,
     Error,
@@ -40,7 +40,7 @@ pub enum TuiEvent {
 
 /// The TUI structure that holds the state of the terminal enviornment as well
 /// as the handling of reading of events from the CrosstermBackend
-pub struct Tui {
+pub(crate) struct Tui {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
     pub task: JoinHandle<()>,
     pub cancellation_token: CancellationToken,
@@ -108,7 +108,7 @@ impl Tui {
             // Send Init event for TUI application
             // If this fails there is no reason for the application to continue
             // so we unwrap it
-            _event_tx.send(TuiEvent::Init).unwrap();
+            _event_tx.send(TuiEvent::Init).expect("TUI init failed");
 
             // Handles and sends crossterm events as well as tick and render ticks
             // to TUI application
@@ -127,20 +127,20 @@ impl Tui {
                         match maybe_event {
                             Some(Ok(CrosstermEvent::Key(key))) => {
                                         if key.kind == KeyEventKind::Press {
-                                            _event_tx.send(TuiEvent::Key(key)).unwrap();
+                                            _event_tx.send(TuiEvent::Key(key)).expect("TUI key event send failed");
                                         }
                                     }
                             Some(Err(_)) => {
-                                _event_tx.send(TuiEvent::Error).unwrap();
+                                _event_tx.send(TuiEvent::Error).expect("TUI key event error send failed");
                             }
                             _ => {},
                         }
                     }
                     _ = tick_delay => {
-                        _event_tx.send(TuiEvent::Tick).unwrap();
+                        _event_tx.send(TuiEvent::Tick).expect("TUI tick event send failed");
                     },
                     _ = render_delay => {
-                        _event_tx.send(TuiEvent::Render).unwrap();
+                        _event_tx.send(TuiEvent::Render).expect("TUI render event send failed");
                     },
                 }
             }

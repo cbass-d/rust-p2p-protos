@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use color_eyre::eyre::Result;
 use futures::StreamExt;
-use libp2p::{Multiaddr, PeerId, Swarm, core::ConnectedPoint, swarm::SwarmEvent};
+use libp2p::{Multiaddr, PeerId, core::ConnectedPoint, swarm::SwarmEvent};
 use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
@@ -56,7 +56,7 @@ impl RunningNode {
             self.base.peer_id
         );
 
-        let _ = self
+        if let Err(e) = self
             .base
             .network_event_tx
             .send(NetworkEvent::NodeRunning {
@@ -64,7 +64,10 @@ impl RunningNode {
                 message_history: self.logs.clone(),
                 node_connections: self.current_peers.clone(),
             })
-            .await;
+            .await
+        {
+            warn!(target: "node", "failed to send node running event: {e}");
+        }
 
         self.base
             .swarm
@@ -107,13 +110,16 @@ impl RunningNode {
 
         info!(target: "node", "node {} now shutting down", self.base.peer_id);
 
-        let _ = self
+        if let Err(e) = self
             .base
             .network_event_tx
             .send(NetworkEvent::NodeStopped {
                 peer_id: self.base.peer_id,
             })
-            .await;
+            .await
+        {
+            warn!(target: "node", "failed to send node stopped event: {e}");
+        }
 
         Ok(NodeResult::Success)
     }
@@ -127,7 +133,9 @@ impl RunningNode {
     fn handle_network_message(&mut self, message: (NodeCommand, oneshot::Sender<NodeResponse>)) {
         let (command, reply_tx) = message;
         if let Some(response) = self.handle_node_command(command) {
-            reply_tx.send(response).unwrap();
+            if let Err(e) = reply_tx.send(response) {
+                warn!(target: "node", "failed to send command response: {e:#?}");
+            }
         }
     }
     async fn handle_swarm_event(
@@ -148,7 +156,7 @@ impl RunningNode {
                 let local_p2p_addr = address
                     .clone()
                     .with_p2p(*self.base.swarm.local_peer_id())
-                    .unwrap();
+                    .expect("peer id mismatch");
                 debug!(target: "node", "listening on p2p address {:?}", local_p2p_addr);
 
                 self.logs.write().0.add_swarm_event(
@@ -182,13 +190,15 @@ impl RunningNode {
                 );
 
                 // Send event of node connections
-                network_event_tx
+                if let Err(e) = network_event_tx
                     .send(NetworkEvent::NodesConnected {
                         peer_one: peer_id,
                         peer_two: self.base.peer_id,
                     })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "node", "failed to send nodes connected event: {e}");
+                }
 
                 if !self.bootstrapped {
                     debug!(target: "kademlia_events", "attempting kademlia bootstrapping");
@@ -214,13 +224,15 @@ impl RunningNode {
                 );
 
                 // Send event of nodes disconnecting
-                network_event_tx
+                if let Err(e) = network_event_tx
                     .send(NetworkEvent::NodesDisconnected {
                         peer_one: peer_id,
                         peer_two: self.base.peer_id,
                     })
                     .await
-                    .unwrap();
+                {
+                    warn!(target: "node", "failed to send nodes disconnected event: {e}");
+                }
 
                 let mut current_peers = self.current_peers.write();
                 current_peers.remove(&peer_id);
@@ -255,7 +267,9 @@ impl RunningNode {
                     );
                 }
 
-                identify_handler::handle_event(self, event).unwrap();
+                if let Err(e) = identify_handler::handle_event(self, event) {
+                    warn!(target: "node", "failed to handle indentify event: {e}");
+                }
             }
             SwarmEvent::Behaviour(NodeNetworkEvent::Kademlia(event)) => {
                 {
@@ -268,7 +282,9 @@ impl RunningNode {
                     );
                 }
 
-                kad_handler::handle_event(self, event).unwrap();
+                if let Err(e) = kad_handler::handle_event(self, event) {
+                    warn!(target: "node", "failed to handle kad event: {e}");
+                }
             }
             other => {
                 debug!("new event: {:?}", other);

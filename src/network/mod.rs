@@ -147,7 +147,7 @@ impl NodeNetwork {
                     && let Some(address) = self.addresses.get(&peer_two)
                 {
                     let (tx, _reply_rx) = oneshot::channel();
-                    node_channel
+                    if let Err(e) = node_channel
                         .send((
                             NodeCommand::ConnectTo {
                                 peer: address.to_owned(),
@@ -155,29 +155,36 @@ impl NodeNetwork {
                             tx,
                         ))
                         .await
-                        .unwrap();
+                    {
+                        warn!(target: "node_network", "failed to send connect command: {e}");
+                    }
                 }
             }
             NetworkCommand::DisconectNodes { peer_one, peer_two } => {
                 if let Some(node_channel) = self.nodes.get(&peer_one) {
                     let (tx, reply_rx) = oneshot::channel();
-                    node_channel
+                    if let Err(e) = node_channel
                         .send((NodeCommand::DisconnectFrom { peer: peer_two }, tx))
                         .await
-                        .unwrap();
+                    {
+                        warn!(target: "node_network", "failed to send disconnect command: {e}");
+                    }
 
                     let response = reply_rx.await;
 
                     debug!(target: "node_network", "nodes disconnected");
 
                     if let Ok(NodeResponse::Disconnected { peer }) = response {
-                        self.network_event_tx
+                        if let Err(e) = self
+                            .network_event_tx
                             .send(NetworkEvent::NodesDisconnected {
                                 peer_one,
                                 peer_two: peer,
                             })
                             .await
-                            .unwrap();
+                        {
+                            warn!(target: "node_network", "failed to send disconnect network event: {e}");
+                        }
                     }
                 }
             }
@@ -185,20 +192,22 @@ impl NodeNetwork {
                 if let Some(node_channel) = self.nodes.get(&peer_id) {
                     let (tx, reply_rx) = oneshot::channel();
 
-                    node_channel
-                        .send((NodeCommand::GetIdentifyInfo, tx))
-                        .await
-                        .unwrap();
+                    if let Err(e) = node_channel.send((NodeCommand::GetIdentifyInfo, tx)).await {
+                        warn!(target: "node_network", "failed to send identify info command: {e}");
+                    }
 
                     let response = reply_rx.await;
 
                     debug!(target: "node_network", "received identify info: {:?}", response);
 
                     if let Ok(NodeResponse::IdentifyInfo { info }) = response {
-                        self.network_event_tx
+                        if let Err(e) = self
+                            .network_event_tx
                             .send(NetworkEvent::IdentifyInfo { info })
                             .await
-                            .unwrap();
+                        {
+                            warn!(target: "node_network", "failed to send identify info network event: {e}");
+                        }
                     }
                 }
             }
@@ -206,48 +215,60 @@ impl NodeNetwork {
                 if let Some(node_channel) = self.nodes.get(&peer_id) {
                     let (tx, reply_rx) = oneshot::channel();
 
-                    node_channel
-                        .send((NodeCommand::GetKademliaInfo, tx))
-                        .await
-                        .unwrap();
+                    if let Err(e) = node_channel.send((NodeCommand::GetKademliaInfo, tx)).await {
+                        warn!(target: "node_network", "failed to send kad info command: {e}");
+                    }
 
                     let response = reply_rx.await;
 
                     debug!(target: "node_network", "received kademlia info: {:?}", response);
 
                     if let Ok(NodeResponse::KademliaInfo { info }) = response {
-                        self.network_event_tx
+                        if let Err(e) = self
+                            .network_event_tx
                             .send(NetworkEvent::KademliaInfo { info })
                             .await
-                            .unwrap();
+                        {
+                            warn!(target: "node_network", "failed to send kad info network event: {e}");
+                        }
                     }
                 }
             }
             NetworkCommand::StopNode { peer_id } => {
                 if let Some(node_channel) = self.nodes.get(&peer_id) {
                     let (tx, _reply_rx) = oneshot::channel();
-                    node_channel.send((NodeCommand::Stop, tx)).await.unwrap();
+                    if let Err(e) = node_channel.send((NodeCommand::Stop, tx)).await {
+                        warn!(target: "node_network", "failed to send stop command: {e}");
+                    }
                 }
             }
             NetworkCommand::StartNode => {
                 // We limit the amount of nodes to 10
                 if self.nodes.len() >= 10 {
-                    self.network_event_tx.send(NetworkEvent::MaxNodes).await;
+                    if let Err(e) = self.network_event_tx.send(NetworkEvent::MaxNodes).await {
+                        warn!(target: "node_network", "failed to send max nodes network event: {e}");
+                    }
                     return node_task_set;
                 }
 
-                // Store the nodes Multiaddress for connecting the nodes in the future
-                let node = self.add_node().unwrap();
+                // Build the new node
+                match self.add_node() {
+                    Ok(node) => {
+                        // Every node will be able to send network events and will have
+                        // a cancellation token to know when to stop
+                        let _network_event_tx = self.network_event_tx.clone();
+                        let _canceallation_token = self.cancellation_token.clone();
 
-                // Every node will be able to send network events and will have
-                // a cancellation token to know when to stop
-                let _network_event_tx = self.network_event_tx.clone();
-                let _canceallation_token = self.cancellation_token.clone();
-
-                node_task_set.spawn(async move {
-                    let mut running_node = node.start();
-                    running_node.run().await
-                });
+                        // Start the new node
+                        node_task_set.spawn(async move {
+                            let mut running_node = node.start();
+                            running_node.run().await
+                        });
+                    }
+                    Err(e) => {
+                        warn!(target: "node_network", "failed to build node: {e}");
+                    }
+                }
 
                 debug!(target: "node_network", "new node task spawned");
             }

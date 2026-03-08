@@ -26,7 +26,7 @@ use crate::tui::app::Action;
 const RADIUS: f64 = 12.0;
 
 #[derive(Debug, Clone)]
-pub struct NodeCoords {
+pub(crate) struct NodeCoords {
     x: f64,
     y: f64,
 }
@@ -35,7 +35,7 @@ pub struct NodeCoords {
 /// Consists of a list that can be iterated through by
 /// the user
 #[derive(Debug, Clone)]
-pub struct NodeBox {
+pub(crate) struct NodeBox {
     /// A IndexSet (a hashset that be accessed using []) of the actively
     /// running nodes that is used to build the list
     active_nodes: IndexSet<PeerId>,
@@ -181,17 +181,6 @@ impl NodeBox {
             }
         }
     }
-
-    //fn generate_connections(&mut self, peer_one: &PeerId, peer_two: &PeerID) {
-    //    if let Some(connections) = self.node_connections.get(peer) {
-    //        let connections = connections.read().unwrap().clone();
-    //        for other_peer in connections {
-    //            self.connect_two_nodes(peer, &other_peer);
-    //        }
-    //    }
-
-    //    debug!(target: "node_box", "current lines: {:?}", self.lines);
-    //}
 
     fn remove_connection(&mut self, peer_one: PeerId, peer_two: PeerId) {
         self.lines.remove(&(peer_one, peer_two));
