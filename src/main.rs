@@ -3,17 +3,20 @@ mod error;
 mod messages;
 mod network;
 mod node;
+mod simulation;
 mod tui;
 
 use clap::Parser;
 use color_eyre::eyre::Result;
-use network::NodeNetwork;
-use tokio::task::JoinSet;
-use tracing::{error, info, instrument};
+use tracing::{info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
 
-use crate::{cli::CliArgs, error::AppError, tui::app::App};
+use crate::{cli::CliArgs, error::AppError, simulation::Simulation};
+
+const MAX_NODES: u8 = 10;
+const TICK_RATE: f64 = 4.0;
+const FRAME_RATE: f64 = 60.0;
 
 /// Initialize tracing for application, uses a rolling log file that refreshes daily
 fn init_tracing() -> Result<WorkerGuard, AppError> {
@@ -42,49 +45,20 @@ async fn main() -> Result<()> {
     let _guard = init_tracing()?;
 
     let args = CliArgs::parse();
-    let number_of_nodes = args.nodes;
+    let starting_nodes = args.nodes;
 
-    if number_of_nodes > 10 {
+    if starting_nodes > MAX_NODES {
         return Err(AppError::MaxNodes { max: 10 }.into());
     }
 
-    // The task set will hold the TUI taks and the node network tasks
-    // Using task set makes it easier to manage the waiting on tasks to finish
-    let mut task_set: JoinSet<Result<(), AppError>> = JoinSet::new();
+    let simulation = Simulation::builder()
+        .max_nodes(MAX_NODES)
+        .starting_nodes(starting_nodes)
+        .tick_rate(TICK_RATE)
+        .frame_rate(FRAME_RATE)
+        .build()?;
 
-    // Build the TUI application, this will hold the terminal and state of the TUI
-    // - network_event_tx: used to send events from the node network to the TUI module
-    // - network_command_rx: used for the node network receive commands from the TUI module
-    let (mut app, cancellation_token, network_event_tx, network_command_rx) = App::new();
-
-    let mut network = NodeNetwork::new(network_event_tx.clone(), cancellation_token.clone());
-
-    // Run the TUI task
-    let app_task = task_set.spawn(async move { app.run().await });
-
-    // Run the node network task
-    let _cancellation_token = cancellation_token.clone();
-    let network_task =
-        task_set.spawn(async move { network.run(number_of_nodes, network_command_rx).await });
-
-    // Wait for all the tasks to finish gracefully
-    while let Some(task_result) = task_set.join_next_with_id().await {
-        match task_result {
-            Ok(result) if result.0 == app_task.id() => {
-                info!("TUI app task finished: {result:#?}");
-            }
-            Ok(result) if result.0 == network_task.id() => {
-                info!("Node network task finished: {result:#?}");
-            }
-            Err(e) if e.id() == app_task.id() => {
-                error!("Node network task failed to complete: {e}");
-            }
-            Err(e) if e.id() == network_task.id() => {
-                error!("TUI app task failed to complete: {e}");
-            }
-            _ => {}
-        }
-    }
+    simulation.run().await?;
 
     info!("node network shutdown");
 

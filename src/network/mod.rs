@@ -35,6 +35,15 @@ pub(crate) struct NodeNetwork {
 
     /// The Instant that the network started, used to stamp swarm events
     network_start: Instant,
+
+    /// The mpsc channel where network commands will be recieved from the TUI
+    network_command_rx: mpsc::Receiver<NetworkCommand>,
+
+    /// The max number of nodes the network can have
+    max_nodes: u8,
+
+    /// The number of nodes the network will start with
+    starting_nodes: u8,
 }
 
 impl NodeNetwork {
@@ -42,7 +51,10 @@ impl NodeNetwork {
     /// number of starting nodes
     pub fn new(
         network_event_tx: mpsc::Sender<NetworkEvent>,
+        network_command_rx: mpsc::Receiver<NetworkCommand>,
         cancellation_token: CancellationToken,
+        max_nodes: u8,
+        starting_nodes: u8,
     ) -> Self {
         debug!(target: "node_network", "node network built");
 
@@ -52,6 +64,9 @@ impl NodeNetwork {
             network_event_tx,
             cancellation_token,
             network_start: Instant::now(),
+            network_command_rx,
+            max_nodes,
+            starting_nodes,
         }
     }
 
@@ -75,11 +90,7 @@ impl NodeNetwork {
 
     /// Main run loop of for the Node Network
     #[instrument(skip_all, name = "run network")]
-    pub async fn run(
-        &mut self,
-        number_of_nodes: u8,
-        mut network_command_rx: mpsc::Receiver<NetworkCommand>,
-    ) -> Result<(), AppError> {
+    pub async fn run(&mut self) -> Result<(), AppError> {
         info!(target: "node_network", "node network running with {} nodes", self.nodes.len());
 
         self.network_start = Instant::now();
@@ -87,7 +98,7 @@ impl NodeNetwork {
         let mut node_task_set: JoinSet<Result<NodeResult, NodeError>> = JoinSet::new();
 
         // Create and run the requested number of nodes
-        for _ in 0..number_of_nodes {
+        for _ in 0..self.starting_nodes {
             // Build the new node
             let node = match self.add_node() {
                 Ok(node) => node,
@@ -117,7 +128,7 @@ impl NodeNetwork {
                     debug!(target: "node_network", "cancellation token signal received");
                     break;
                 }
-                Some(command) = network_command_rx.recv() => {
+                Some(command) = self.network_command_rx.recv() => {
                     debug!(target: "node_network", "network command recieved {:?}", command);
 
                     node_task_set = self.handle_network_command(command, node_task_set).await;
@@ -254,7 +265,7 @@ impl NodeNetwork {
             }
             NetworkCommand::StartNode => {
                 // We limit the amount of nodes to 10
-                if self.nodes.len() >= 10 {
+                if self.nodes.len() >= self.max_nodes as usize {
                     if let Err(e) = self.network_event_tx.send(NetworkEvent::MaxNodes).await {
                         warn!(target: "node_network", "failed to send max nodes network event: {e}");
                     }
@@ -301,8 +312,15 @@ mod tests {
     #[test]
     fn test_create_empty_network() {
         let (network_event_tx, _) = mpsc::channel::<NetworkEvent>(1);
+        let (_, network_command_rx) = mpsc::channel::<NetworkCommand>(1);
         let cancellation_token = CancellationToken::new();
-        let node_network = NodeNetwork::new(network_event_tx, cancellation_token);
+        let node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            1,
+            0,
+        );
 
         assert!(node_network.nodes.is_empty());
         assert!(node_network.addresses.is_empty());
@@ -311,8 +329,15 @@ mod tests {
     #[test]
     fn test_adding_new_node() {
         let (network_event_tx, _) = mpsc::channel::<NetworkEvent>(1);
+        let (_, network_command_rx) = mpsc::channel::<NetworkCommand>(1);
         let cancellation_token = CancellationToken::new();
-        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token);
+        let mut node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            1,
+            0,
+        );
 
         let node = node_network.add_node().unwrap();
 
@@ -322,13 +347,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_nodes() {
-        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(10);
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let (network_command_tx, network_command_rx) = mpsc::channel::<NetworkCommand>(1);
         let cancellation_token = CancellationToken::new();
-        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token);
+        let mut node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            1,
+            1,
+        );
 
-        let (network_command_tx, network_command_rx) = mpsc::channel(10);
         let _task = tokio::spawn(async move {
-            let _ = node_network.run(10, network_command_rx).await;
+            let _ = node_network.run().await;
         });
 
         network_command_tx
@@ -345,12 +376,17 @@ mod tests {
     #[tokio::test]
     async fn test_connect_two_nodes() {
         let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let (network_command_tx, network_command_rx) = mpsc::channel::<NetworkCommand>(1);
         let cancellation_token = CancellationToken::new();
-        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
-
-        let (network_command_tx, network_command_rx) = mpsc::channel(1);
+        let mut node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            2,
+            2,
+        );
         let _task = tokio::spawn(async move {
-            let _ = node_network.run(2, network_command_rx).await;
+            let _ = node_network.run().await;
         });
 
         let mut peer_ids = vec![];
@@ -380,12 +416,18 @@ mod tests {
     #[tokio::test]
     async fn test_stop_node() {
         let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let (network_command_tx, network_command_rx) = mpsc::channel::<NetworkCommand>(1);
         let cancellation_token = CancellationToken::new();
-        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+        let mut node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            1,
+            1,
+        );
 
-        let (network_command_tx, network_command_rx) = mpsc::channel(1);
         let _task = tokio::spawn(async move {
-            let _ = node_network.run(1, network_command_rx).await;
+            let _ = node_network.run().await;
         });
 
         let mut peer_ids = vec![];
@@ -413,12 +455,18 @@ mod tests {
     #[tokio::test]
     async fn test_start_node() {
         let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(1);
+        let (network_command_tx, network_command_rx) = mpsc::channel::<NetworkCommand>(1);
         let cancellation_token = CancellationToken::new();
-        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+        let mut node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            1,
+            0,
+        );
 
-        let (network_command_tx, network_command_rx) = mpsc::channel(1);
         let _task = tokio::spawn(async move {
-            let _ = node_network.run(0, network_command_rx).await;
+            let _ = node_network.run().await;
         });
 
         network_command_tx
@@ -436,13 +484,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_disconnect_two_nodes() {
-        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(10);
+        let (network_event_tx, mut network_event_rx) = mpsc::channel::<NetworkEvent>(2);
+        let (network_command_tx, network_command_rx) = mpsc::channel::<NetworkCommand>(2);
         let cancellation_token = CancellationToken::new();
-        let mut node_network = NodeNetwork::new(network_event_tx, cancellation_token.clone());
+        let mut node_network = NodeNetwork::new(
+            network_event_tx,
+            network_command_rx,
+            cancellation_token,
+            2,
+            2,
+        );
 
-        let (network_command_tx, network_command_rx) = mpsc::channel(1);
         let _task = tokio::spawn(async move {
-            let _ = node_network.run(2, network_command_rx).await;
+            let _ = node_network.run().await;
         });
 
         let mut peer_ids = vec![];

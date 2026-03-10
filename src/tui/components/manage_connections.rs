@@ -4,6 +4,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
+use tracing::debug;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
@@ -15,7 +16,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListState, Padding, Paragraph, Widget},
 };
-use tracing::debug;
 
 use crate::tui::{app::Action, components::popup::PopUpContent};
 
@@ -148,7 +148,13 @@ impl ManageConnections {
             return;
         }
 
-        let other_nodes = self.active_nodes.clone();
+        let other_nodes: IndexSet<&PeerId> = self
+            .active_nodes
+            .iter()
+            .filter(|p| *p != &self.node.unwrap())
+            .collect();
+
+        debug!(target: "manage_connections", "rendering with peer list: {0:#?}", other_nodes);
 
         if other_nodes.is_empty() {
             Paragraph::new("--- No other peers --- ")
@@ -168,7 +174,7 @@ impl ManageConnections {
     }
 
     /// Format the peer list to reflect active connections to be displayed
-    fn format_peer_list(&self, peer_list: IndexSet<PeerId>) -> Vec<String> {
+    fn format_peer_list(&self, peer_list: IndexSet<&PeerId>) -> Vec<String> {
         self.node
             .and_then(|node| self.node_connections.get(&node))
             .map(|connections| {
@@ -187,17 +193,24 @@ impl ManageConnections {
             .unwrap_or_default()
     }
 
+    fn remove_peer_from_connections(&mut self, peer_id: &PeerId) {
+        self.node_connections
+            .iter_mut()
+            .for_each(|(_, connections)| {
+                let mut connections = connections.write();
+
+                connections.remove(peer_id);
+            });
+
+        self.node_connections.remove(peer_id);
+    }
+
     pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayManageConnections { peer_id } => {
                 self.node = Some(peer_id);
-                self.active_nodes.swap_remove(&peer_id);
             }
-            Action::CloseNodeCommands => {
-                if let Some(node) = self.node {
-                    self.active_nodes.insert(node);
-                }
-            }
+            Action::CloseNodeCommands => if let Some(node) = self.node {},
             Action::AddNode {
                 peer_id,
                 node_connections,
@@ -213,7 +226,10 @@ impl ManageConnections {
                 }
             }
             Action::RemoveNode { peer_id } => {
-                self.active_nodes.swap_remove(&peer_id);
+                debug!(target: "manage_connections", "Removing peer {0} from peer list", peer_id);
+                self.active_nodes.shift_remove(&peer_id);
+                debug!(target: "manage_connections", "new peer list: {0:#?}", self.active_nodes);
+                self.remove_peer_from_connections(&peer_id);
                 self.len -= 1;
             }
             _ => {}

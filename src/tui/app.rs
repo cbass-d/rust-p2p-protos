@@ -101,7 +101,7 @@ pub(crate) enum Action {
 }
 
 #[derive(Debug)]
-pub struct App {
+pub(crate) struct App {
     /// Flag for stopping the TUI application
     quit: bool,
 
@@ -115,7 +115,7 @@ pub struct App {
 
     /// MPSC channel for sending events from the TUI
     /// to the node network process
-    command_tx: mpsc::Sender<NetworkCommand>,
+    network_command_tx: mpsc::Sender<NetworkCommand>,
 
     /// Message histories and stats of the nodes
     node_logs: HashMap<PeerId, Arc<RwLock<(MessageHistory, NodeStats)>>>,
@@ -140,48 +140,49 @@ pub struct App {
 
     /// Determines which of the components is in focus
     focus: Focus,
+
+    // Tick rate for the TUI
+    tick_rate: f64,
+
+    // Frame rate for the TUI frame render
+    frame_rate: f64,
 }
 
 impl App {
     /// Builds a new App structure, returns the App, a CancellationToken, mpsc sender for
     /// NetworkEvent, and a mpsc receiver for NetworkCommand
-    pub fn new() -> (
-        Self,
-        CancellationToken,
-        mpsc::Sender<NetworkEvent>,
-        mpsc::Receiver<NetworkCommand>,
-    ) {
-        // Create the MPSC channels for passing of messages betweeen the node network and the TUI
-        let (network_event_tx, network_event_rx) = mpsc::channel::<NetworkEvent>(10);
-        let (command_tx, command_rx) = mpsc::channel::<NetworkCommand>(10);
-
-        let cancellation_token = CancellationToken::new();
-        (
-            Self {
-                quit: false,
-                cancellation_token: cancellation_token.clone(),
-                network_event_rx,
-                command_tx,
-                node_box: NodeBox::new(),
-                node_log: NodeLog::new(),
-                node_list: NodeList::new(),
-                popup: Popup::new(),
-                actions: VecDeque::new(),
-                focus: Focus::NodeList,
-                node_logs: HashMap::new(),
-                node_connections: HashMap::new(),
-            },
-            cancellation_token,
-            network_event_tx,
-            command_rx,
-        )
+    pub fn new(
+        cancellation_token: CancellationToken,
+        network_event_rx: mpsc::Receiver<NetworkEvent>,
+        network_command_tx: mpsc::Sender<NetworkCommand>,
+        tick_rate: f64,
+        frame_rate: f64,
+    ) -> Self {
+        Self {
+            quit: false,
+            cancellation_token: cancellation_token,
+            network_event_rx,
+            network_command_tx,
+            node_box: NodeBox::new(),
+            node_log: NodeLog::new(),
+            node_list: NodeList::new(),
+            popup: Popup::new(),
+            actions: VecDeque::new(),
+            focus: Focus::NodeList,
+            node_logs: HashMap::new(),
+            node_connections: HashMap::new(),
+            tick_rate,
+            frame_rate,
+        }
     }
 
     /// The main logic for the TUI application
     #[instrument(skip_all, name = "TUI")]
     pub async fn run(&mut self) -> Result<(), AppError> {
         // Create and enter TUI terminal environment
-        let mut tui = Tui::new()?.tick_rate(4.0).frame_rate(30.0);
+        let mut tui = Tui::new()?
+            .tick_rate(self.tick_rate)
+            .frame_rate(self.frame_rate);
 
         tui.enter()?;
 
@@ -303,7 +304,7 @@ impl App {
             Action::DisplayIdentifyInfo { peer_id } => {
                 debug!(target: "TUI App", "displaying identify info for node {peer_id}");
                 if let Err(e) = self
-                    .command_tx
+                    .network_command_tx
                     .send(NetworkCommand::GetIdentifyInfo { peer_id })
                     .await
                 {
@@ -315,7 +316,7 @@ impl App {
             Action::DisplayKademliaInfo { peer_id } => {
                 debug!(target: "TUI App", "displaying kademlia info for node {peer_id}");
                 if let Err(e) = self
-                    .command_tx
+                    .network_command_tx
                     .send(NetworkCommand::GetKademliaInfo { peer_id })
                     .await
                 {
@@ -329,7 +330,7 @@ impl App {
             }
             Action::ConnectTo { peer_one, peer_two } => {
                 if let Err(e) = self
-                    .command_tx
+                    .network_command_tx
                     .send(NetworkCommand::ConnectNodes { peer_one, peer_two })
                     .await
                 {
@@ -338,7 +339,7 @@ impl App {
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
                 if let Err(e) = self
-                    .command_tx
+                    .network_command_tx
                     .send(NetworkCommand::DisconectNodes { peer_one, peer_two })
                     .await
                 {
@@ -347,7 +348,7 @@ impl App {
             }
             Action::StopNode { peer_id } => {
                 if let Err(e) = self
-                    .command_tx
+                    .network_command_tx
                     .send(NetworkCommand::StopNode { peer_id })
                     .await
                 {
@@ -359,7 +360,11 @@ impl App {
                 self.actions.push_back(Action::CloseNodeCommands);
             }
             Action::StartNode => {
-                if let Err(e) = self.command_tx.send(NetworkCommand::StartNode).await {
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkCommand::StartNode)
+                    .await
+                {
                     warn!(target: "TUI App", "failed to send network command: {e}");
                 }
             }
