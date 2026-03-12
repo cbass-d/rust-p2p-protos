@@ -1,8 +1,13 @@
-use std::collections::VecDeque;
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+};
 
 use color_eyre::eyre::Result;
 use crossterm::event::KeyEvent;
+use indexmap::IndexSet;
 use libp2p::PeerId;
+use parking_lot::RwLock;
 use ratatui::{Frame, layout::Rect};
 
 use crate::tui::{
@@ -51,7 +56,7 @@ pub(crate) struct Popup {
 }
 
 impl Popup {
-    pub fn new() -> Self {
+    pub fn new(active_nodes: Arc<RwLock<IndexSet<PeerId>>>) -> Self {
         Self {
             node: None,
             content: None,
@@ -59,7 +64,7 @@ impl Popup {
             node_info: NodeInfo::new(),
             identify_info: IdentifyInfo::new(),
             kademlia_info: KademliaInfo::new(),
-            manage_connections: ManageConnections::new(),
+            manage_connections: ManageConnections::new(active_nodes),
             focus: false,
         }
     }

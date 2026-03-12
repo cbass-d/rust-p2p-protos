@@ -1,11 +1,11 @@
+use indexmap::IndexSet;
 use parking_lot::RwLock;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    error::Error,
     sync::Arc,
 };
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::Result;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
@@ -109,6 +109,9 @@ pub(crate) struct App {
     /// to exit
     cancellation_token: CancellationToken,
 
+    /// List of active nodes in the network
+    active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+
     /// MPSC channel for recieving events from the node network to be
     /// reflected by the TUI
     network_event_rx: mpsc::Receiver<NetworkEvent>,
@@ -158,19 +161,21 @@ impl App {
         tick_rate: f64,
         frame_rate: f64,
     ) -> Self {
+        let active_nodes = Arc::new(RwLock::new(IndexSet::new()));
         Self {
             quit: false,
             cancellation_token: cancellation_token,
             network_event_rx,
             network_command_tx,
-            node_box: NodeBox::new(),
+            node_box: NodeBox::new(active_nodes.clone()),
             node_log: NodeLog::new(),
-            node_list: NodeList::new(),
-            popup: Popup::new(),
+            node_list: NodeList::new(active_nodes.clone()),
+            popup: Popup::new(active_nodes.clone()),
             actions: VecDeque::new(),
             focus: Focus::NodeList,
             node_logs: HashMap::new(),
             node_connections: HashMap::new(),
+            active_nodes,
             tick_rate,
             frame_rate,
         }
@@ -435,6 +440,11 @@ impl App {
                 debug!(target: "TUI", "network event recieved: node running");
                 self.node_logs.insert(peer_id, message_history);
 
+                {
+                    let mut active_nodes = self.active_nodes.write();
+                    active_nodes.insert(peer_id);
+                }
+
                 actions.push_back(Action::AddNode {
                     peer_id,
                     node_connections,
@@ -444,6 +454,11 @@ impl App {
                 debug!(target: "TUI", "network event recieved: node stopped");
 
                 self.node_logs.remove_entry(&peer_id);
+
+                {
+                    let mut active_nodes = self.active_nodes.write();
+                    active_nodes.remove(&peer_id);
+                }
 
                 actions.push_back(Action::RemoveNode { peer_id });
             }

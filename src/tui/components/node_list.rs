@@ -1,9 +1,13 @@
 use color_eyre::eyre::Result;
-use std::collections::VecDeque;
+use indexmap::IndexSet;
+use parking_lot::RwLock;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 use tracing::debug;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use indexmap::IndexSet;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
@@ -19,9 +23,9 @@ use crate::tui::{app::Action, components::popup::PopUpContent};
 /// the user
 #[derive(Debug, Clone)]
 pub(crate) struct NodeList {
-    /// A IndexSet (a hashset that be accessed using []) of the actively
-    /// running nodes that is used to build the list
-    active_nodes: IndexSet<PeerId>,
+    /// Hashset containig the list of active nodes, shared by the App
+    /// and other components
+    active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
 
     /// The length of the current list of active nodes
     len: usize,
@@ -34,9 +38,9 @@ pub(crate) struct NodeList {
 }
 
 impl NodeList {
-    pub fn new() -> Self {
+    pub fn new(active_nodes: Arc<RwLock<IndexSet<PeerId>>>) -> Self {
         Self {
-            active_nodes: IndexSet::new(),
+            active_nodes,
             list_state: ListState::default(),
             len: 0,
             focus: false,
@@ -58,21 +62,26 @@ impl NodeList {
             Block::new().title("Nodes").borders(Borders::ALL)
         };
 
-        if self.active_nodes.len() < 10 {
+        let active_nodes = self.active_nodes.read();
+
+        // Hashmap of idx in the list to the peer id
+        let mut idx_to_peer = HashMap::new();
+        let mut nodes = vec![];
+        active_nodes.iter().enumerate().for_each(|(i, p)| {
+            idx_to_peer.insert(i, p);
+            nodes.push(p);
+        });
+
+        if active_nodes.len() < 10 {
             block = block.title_bottom("<a> Add to add node");
         } else {
             block = block.title_bottom("MAX NODES");
         }
 
-        let list = List::new(
-            self.active_nodes
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<String>>(),
-        )
-        .highlight_style(Style::new().reversed())
-        .highlight_symbol(">")
-        .block(block);
+        let list = List::new(nodes.iter().map(|p| p.to_string()).collect::<Vec<String>>())
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol(">")
+            .block(block);
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
@@ -88,8 +97,9 @@ impl NodeList {
 
                 // Get the index of the newly selected node
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+                let active_nodes = self.active_nodes.read();
                 actions.push_back(Action::DisplayLogs {
-                    peer_id: self.active_nodes[node_idx],
+                    peer_id: active_nodes[node_idx],
                 });
             }
             KeyCode::Down => {
@@ -97,8 +107,9 @@ impl NodeList {
 
                 // Get the index of the newly selected node
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+                let active_nodes = self.active_nodes.read();
                 actions.push_back(Action::DisplayLogs {
-                    peer_id: self.active_nodes[node_idx],
+                    peer_id: active_nodes[node_idx],
                 });
             }
             KeyCode::Char('a') => {
@@ -106,9 +117,10 @@ impl NodeList {
             }
             KeyCode::Enter => {
                 let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+                let active_nodes = self.active_nodes.read();
                 actions.push_back(Action::Popup {
                     content: PopUpContent::NodeCommands,
-                    peer_id: self.active_nodes[node_idx],
+                    peer_id: active_nodes[node_idx],
                 });
             }
             _ => {}
@@ -134,24 +146,22 @@ impl NodeList {
     pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::AddNode { peer_id, .. } => {
-                self.active_nodes.insert(peer_id);
                 self.len += 1;
-
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
 
                     debug!(target: "node_list", "display log action added");
 
+                    let active_nodes = self.active_nodes.read();
                     actions.push_back(Action::DisplayLogs {
-                        peer_id: self.active_nodes[0],
+                        peer_id: active_nodes[0],
                     });
 
                     debug!(target: "node_list", "display log action added");
                 }
             }
             Action::RemoveNode { peer_id } => {
-                self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
             }
             _ => {}

@@ -1,11 +1,11 @@
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{debug, error, info, instrument};
 
 use crate::{
     error::AppError,
     messages::{NetworkCommand, NetworkEvent},
-    network::{self, NodeNetwork},
+    network::NodeNetwork,
     tui::app::App,
 };
 
@@ -68,11 +68,10 @@ impl SimulationBuilder {
             )));
         }
 
-        // Build the channels to be used
         let (network_event_tx, network_event_rx) =
             mpsc::channel::<NetworkEvent>(EVENT_CHANNEL_SIZE);
         let (network_command_tx, network_command_rx) =
-            mpsc::channel::<NetworkCommand>(EVENT_CHANNEL_SIZE);
+            mpsc::channel::<NetworkCommand>(COMMAND_CHANNEL_SIZE);
 
         let cancellation_token = CancellationToken::new();
 
@@ -107,37 +106,16 @@ impl Simulation {
         SimulationBuilder::new()
     }
 
+    #[instrument(skip_all)]
     pub async fn run(self) -> Result<(), AppError> {
-        // The task set will hold the TUI taks and the node network tasks
-        // Using task set makes it easier to manage the waiting on tasks to finish
-        let mut task_set: JoinSet<Result<(), AppError>> = JoinSet::new();
-
-        // Run the TUI task
         let mut app = self.app;
-        let app_task = task_set.spawn(async move { app.run().await });
 
-        // Run the node network task
         let mut node_network = self.node_network;
-        let network_task = task_set.spawn(async move { node_network.run().await });
 
-        // Wait for all the tasks to finish gracefully
-        while let Some(task_result) = task_set.join_next_with_id().await {
-            match task_result {
-                Ok(result) if result.0 == app_task.id() => {
-                    info!("TUI app task finished: {result:#?}");
-                }
-                Ok(result) if result.0 == network_task.id() => {
-                    info!("Node network task finished: {result:#?}");
-                }
-                Err(e) if e.id() == app_task.id() => {
-                    error!("Node network task failed to complete: {e}");
-                }
-                Err(e) if e.id() == network_task.id() => {
-                    error!("TUI app task failed to complete: {e}");
-                }
-                _ => {}
-            }
-        }
+        let (app_result, network_result) = tokio::try_join!(app.run(), node_network.run())?;
+
+        debug!(target: "simulation", "tui app task ended: {app_result:#?}");
+        debug!(target: "simulation", "node network task ended: {network_result:#?}");
 
         Ok(())
     }

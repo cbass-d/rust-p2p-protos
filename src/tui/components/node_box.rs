@@ -36,9 +36,9 @@ pub(crate) struct NodeCoords {
 /// the user
 #[derive(Debug, Clone)]
 pub(crate) struct NodeBox {
-    /// A IndexSet (a hashset that be accessed using []) of the actively
-    /// running nodes that is used to build the list
-    active_nodes: IndexSet<PeerId>,
+    /// Hashset containig the list of active nodes, shared by the App
+    /// and other components
+    active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
 
     /// The length of the current list of active nodes
     len: usize,
@@ -69,9 +69,9 @@ pub(crate) struct NodeBox {
 }
 
 impl NodeBox {
-    pub fn new() -> Self {
+    pub fn new(active_nodes: Arc<RwLock<IndexSet<PeerId>>>) -> Self {
         Self {
-            active_nodes: IndexSet::new(),
+            active_nodes,
             list_state: ListState::default(),
             len: 0,
             x_bound: 180.0,
@@ -123,7 +123,8 @@ impl NodeBox {
 
     fn update_selection_in_graph(&mut self) {
         let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-        let peer = self.active_nodes[node_idx];
+        let active_nodes = self.active_nodes.read().clone();
+        let peer = active_nodes[node_idx];
         // Update nodes
         self.reset_nodes();
         if let Some(circle) = self.node_shapes.get_mut(&peer) {
@@ -284,9 +285,7 @@ impl NodeBox {
             } => {
                 debug!(target: "node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
 
-                self.active_nodes.insert(peer_id);
                 self.len += 1;
-
                 let node = self.generate_node_on_canvas(&peer_id);
                 self.node_shapes.insert(peer_id, node);
                 self.node_connections.insert(peer_id, node_connections);
@@ -296,13 +295,13 @@ impl NodeBox {
                     self.list_state = self.list_state.with_selected(Some(0));
                     self.update_selection_in_graph();
 
+                    let active_nodes = self.active_nodes.read();
                     actions.push_back(Action::DisplayLogs {
-                        peer_id: self.active_nodes[0],
+                        peer_id: active_nodes[0],
                     });
                 }
             }
             Action::RemoveNode { peer_id } => {
-                self.active_nodes.swap_remove(&peer_id);
                 self.len -= 1;
 
                 self.node_coords.remove(&peer_id);
