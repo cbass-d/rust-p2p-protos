@@ -6,7 +6,7 @@ pub(crate) enum AppError {
     BuildError(String),
     #[error("max number of nodes is {max}")]
     MaxNodes { max: u8 },
-    #[error("tracing subcriber error: {0}")]
+    #[error("tracing subscriber error: {0}")]
     TracingInit(#[from] tracing::dispatcher::SetGlobalDefaultError),
     #[error("TUI init error: {0}")]
     TuiInit(String),

@@ -51,7 +51,7 @@ pub(crate) enum NetworkCommand {
     ConnectNodes { peer_one: PeerId, peer_two: PeerId },
 
     /// Remove the connection between two nodes
-    DisconectNodes { peer_one: PeerId, peer_two: PeerId },
+    DisconnectNodes { peer_one: PeerId, peer_two: PeerId },
 
     /// Get the local identify info for the requested node
     GetIdentifyInfo { peer_id: PeerId },

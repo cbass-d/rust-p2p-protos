@@ -156,7 +156,7 @@ impl MessageHistory {
     }
 
     /// Returns all messages as pretty and formatted ratatui Lines
-    pub fn all_messages_formmatted(&self) -> Vec<Line<'_>> {
+    pub fn all_messages_formatted(&self) -> Vec<Line<'_>> {
         let mut messages = vec![];
         messages.append(&mut self.identify_messages_formatted());
         messages.append(&mut self.kad_messages_formatted());
@@ -179,7 +179,7 @@ impl MessageHistory {
     pub fn display_identify_messages(&self) {
         for message in &self.identify {
             let (event, time) = message;
-            debug!(target: "history", "{}s : {}", time, event);
+            debug!(target: "simulation::node::history", "{}s : {}", time, event);
             println!("{}s : {:?}", time, event);
         }
     }
@@ -188,7 +188,7 @@ impl MessageHistory {
     pub fn display_kademlia_messages(&self) {
         for message in &self.kademlia {
             let (event, time) = message;
-            debug!(target: "history", "{}s : {}", time, event);
+            debug!(target: "simulation::node::history", "{}s : {}", time, event);
             println!("{}s : {:?}", time, event);
         }
     }
@@ -197,7 +197,7 @@ impl MessageHistory {
     pub fn display_swarm_messages(&self) {
         for message in &self.swarm {
             let (event, time) = message;
-            debug!(target: "history", "{}s : {:?}", time, event);
+            debug!(target: "simulation::node::history", "{}s : {:?}", time, event);
             println!("{}s : {:?}", time, event);
         }
     }
@@ -221,7 +221,7 @@ pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
             ..
         } => {
             format!(
-                "RECIEVED Identification information from {} ({})",
+                "RECEIVED Identification information from {} ({})",
                 peer_id, connection_id
             )
         }
@@ -274,13 +274,13 @@ pub fn kad_event_to_string(event: &KadEvent) -> String {
         }
         KadEvent::PendingRoutablePeer { peer, .. } => {
             format!(
-                "PENIDNG ROUTE Connection to peer {} established, pednding addition to table",
+                "PENDING ROUTE Connection to peer {} established, pending addition to table",
                 peer
             )
         }
         KadEvent::OutboundQueryProgressed { id, .. } => {
             format!(
-                "OUTBOUD QUERY PROGRESSES Outbound query {} has progressed",
+                "OUTBOUND QUERY PROGRESSED Outbound query {} has progressed",
                 id
             )
         }

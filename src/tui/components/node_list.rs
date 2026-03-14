@@ -151,14 +151,14 @@ impl NodeList {
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
 
-                    debug!(target: "node_list", "display log action added");
+                    debug!(target: "app::node_list", "display log action added");
 
                     let active_nodes = self.active_nodes.read();
                     actions.push_back(Action::DisplayLogs {
                         peer_id: active_nodes[0],
                     });
 
-                    debug!(target: "node_list", "display log action added");
+                    debug!(target: "app::node_list", "display log action added");
                 }
             }
             Action::RemoveNode { peer_id } => {

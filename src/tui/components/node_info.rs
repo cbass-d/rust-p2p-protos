@@ -69,7 +69,7 @@ impl NodeInfo {
                 KeyCode::Enter => {
                     let selection = self.clamp(self.list_state.selected().unwrap_or(0));
 
-                    debug!(target: "node_info", "node commands option {} selected", selection);
+                    debug!(target: "app::node_info", "node commands option {} selected", selection);
 
                     match selection {
                         0 => {

@@ -112,7 +112,7 @@ pub(crate) struct App {
     /// List of active nodes in the network
     active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
 
-    /// MPSC channel for recieving events from the node network to be
+    /// MPSC channel for receiving events from the node network to be
     /// reflected by the TUI
     network_event_rx: mpsc::Receiver<NetworkEvent>,
 
@@ -182,7 +182,7 @@ impl App {
     }
 
     /// The main logic for the TUI application
-    #[instrument(skip_all, name = "TUI")]
+    #[instrument(skip_all, name = "app")]
     pub async fn run(&mut self) -> Result<(), AppError> {
         // Create and enter TUI terminal environment
         let mut tui = Tui::new()?
@@ -278,7 +278,7 @@ impl App {
 
     /// Process an Action and update the state of the TUI application accordingly
     async fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
-        debug!(target: "TUI App", "updating TUI using action: {:?}", action);
+        debug!(target: "app", "updating TUI using action: {:?}", action);
 
         match action {
             Action::Quit => {
@@ -286,46 +286,46 @@ impl App {
             }
             Action::DisplayLogs { peer_id } => {
                 if let Some(node_logs) = self.node_logs.get(&peer_id) {
-                    debug!(target: "TUI App", "successfully got message history for node: {peer_id}");
+                    debug!(target: "app", "successfully got message history for node: {peer_id}");
 
                     self.node_log.display_logs(node_logs.clone());
                 }
             }
             Action::DisplayNodeCommands { peer_id } => {
-                debug!(target: "TUI App", "displaying node commands for {peer_id}");
+                debug!(target: "app", "displaying node commands for {peer_id}");
 
                 self.unfocus_list_graph();
             }
             Action::DisplayManageConnections { peer_id } => {
-                debug!(target: "TUI App", "displaying manage connections for {peer_id}");
+                debug!(target: "app", "displaying manage connections for {peer_id}");
 
                 self.unfocus_list_graph();
             }
             Action::DisplayInfo { peer_id } => {
-                debug!(target: "TUI App", "displaying node info for {peer_id}");
+                debug!(target: "app", "displaying node info for {peer_id}");
 
                 self.unfocus_list_graph();
             }
             Action::DisplayIdentifyInfo { peer_id } => {
-                debug!(target: "TUI App", "displaying identify info for node {peer_id}");
+                debug!(target: "app", "displaying identify info for node {peer_id}");
                 if let Err(e) = self
                     .network_command_tx
                     .send(NetworkCommand::GetIdentifyInfo { peer_id })
                     .await
                 {
-                    warn!(target: "TUI App", "failed to send network command: {e}");
+                    warn!(target: "app", "failed to send network command: {e}");
                 }
 
                 self.unfocus_list_graph();
             }
             Action::DisplayKademliaInfo { peer_id } => {
-                debug!(target: "TUI App", "displaying kademlia info for node {peer_id}");
+                debug!(target: "app", "displaying kademlia info for node {peer_id}");
                 if let Err(e) = self
                     .network_command_tx
                     .send(NetworkCommand::GetKademliaInfo { peer_id })
                     .await
                 {
-                    warn!(target: "TUI App", "failed to send network command: {e}");
+                    warn!(target: "app", "failed to send network command: {e}");
                 }
 
                 self.unfocus_list_graph();
@@ -339,16 +339,16 @@ impl App {
                     .send(NetworkCommand::ConnectNodes { peer_one, peer_two })
                     .await
                 {
-                    warn!(target: "TUI App", "failed to send network command: {e}");
+                    warn!(target: "app", "failed to send network command: {e}");
                 }
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
                 if let Err(e) = self
                     .network_command_tx
-                    .send(NetworkCommand::DisconectNodes { peer_one, peer_two })
+                    .send(NetworkCommand::DisconnectNodes { peer_one, peer_two })
                     .await
                 {
-                    warn!(target: "TUI App", "failed to send network command: {e}");
+                    warn!(target: "app", "failed to send network command: {e}");
                 }
             }
             Action::StopNode { peer_id } => {
@@ -357,7 +357,7 @@ impl App {
                     .send(NetworkCommand::StopNode { peer_id })
                     .await
                 {
-                    warn!(target: "TUI App", "failed to send network command: {e}");
+                    warn!(target: "app", "failed to send network command: {e}");
                 }
             }
             Action::RemoveNode { .. } => {
@@ -370,7 +370,7 @@ impl App {
                     .send(NetworkCommand::StartNode)
                     .await
                 {
-                    warn!(target: "TUI App", "failed to send network command: {e}");
+                    warn!(target: "app", "failed to send network command: {e}");
                 }
             }
             Action::Popup { content, peer_id } => {
@@ -437,7 +437,7 @@ impl App {
                 message_history,
                 node_connections,
             } => {
-                debug!(target: "TUI", "network event recieved: node running");
+                debug!(target: "TUI", "network event received: node running");
                 self.node_logs.insert(peer_id, message_history);
 
                 {
@@ -451,7 +451,7 @@ impl App {
                 });
             }
             NetworkEvent::NodeStopped { peer_id } => {
-                debug!(target: "TUI", "network event recieved: node stopped");
+                debug!(target: "TUI", "network event received: node stopped");
 
                 self.node_logs.remove_entry(&peer_id);
 
@@ -518,7 +518,7 @@ impl App {
         self.node_log.render(frame, main_chunks[1]);
 
         if self.focus == Focus::PopUp {
-            trace!(target: "TUI", "rendering popup with content: {:?}", self.popup.content);
+            trace!(target: "app", "rendering popup with content: {:?}", self.popup.content);
 
             let rect = Rect {
                 x: frame.area().width / 4,

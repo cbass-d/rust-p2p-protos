@@ -101,7 +101,7 @@ impl NodeBox {
         let nodes = &self.node_shapes;
         let connections = &self.lines;
 
-        trace!(target: "node_box", "{} total nodes being drawn", nodes.len());
+        trace!(target: "app::node_box", "{} total nodes being drawn", nodes.len());
 
         let canvas = Canvas::default()
             .marker(Marker::Braille)
@@ -198,12 +198,12 @@ impl NodeBox {
         let circle_one = self.node_shapes.get(&peer_one);
         let circle_two = self.node_shapes.get(&peer_two);
 
-        debug!(target: "node_box", "attempting to connect {peer_one} and {peer_two}");
+        debug!(target: "app::node_box", "attempting to connect {peer_one} and {peer_two}");
 
         if let Some(circle_one) = circle_one
             && let Some(circle_two) = circle_two
         {
-            debug!(target: "node_box", "two nodes being connected on graph {peer_one} {peer_two}");
+            debug!(target: "app::node_box", "two nodes being connected on graph {peer_one} {peer_two}");
 
             // Draw the line endpoints on the border of the circle
             // rather than the center
@@ -283,7 +283,7 @@ impl NodeBox {
                 peer_id,
                 node_connections,
             } => {
-                debug!(target: "node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
+                debug!(target: "app::node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
 
                 self.len += 1;
                 let node = self.generate_node_on_canvas(&peer_id);

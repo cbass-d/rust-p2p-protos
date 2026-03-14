@@ -48,7 +48,7 @@ impl ConfiguredNode {
         ),
         NodeError,
     > {
-        // Build the mpsc channel where the channel will be recieving messages from
+        // Build the mpsc channel where the channel will be receiving messages from
         let (tx, rx) = mpsc::channel(100);
 
         let node_keys = identity::Keypair::generate_ed25519();

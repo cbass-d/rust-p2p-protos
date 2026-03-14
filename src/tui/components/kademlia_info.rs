@@ -89,7 +89,7 @@ impl KademliaInfo {
             return;
         }
 
-        // Redner the info is present as a Paragraph
+        // Render the info is present as a Paragraph
         if let Some(info) = &self.info {
             let mut lines = Text::from(vec![
                 Line::raw("Node Mode:").style(Style::new().underlined()),

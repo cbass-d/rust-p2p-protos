@@ -43,7 +43,7 @@ impl fmt::Display for NodeStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Packets recieved: {}\nPackets sent: {}\n",
+            "Packets received: {}\nPackets sent: {}\n",
             self.recvd_count, self.sent_count
         )
     }

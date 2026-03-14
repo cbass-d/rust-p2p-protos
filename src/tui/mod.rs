@@ -26,7 +26,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::{error::AppError, tui::app::App};
+use crate::error::AppError;
 
 /// Events originating from the user interacting with the TUI
 /// as well as tick and render events
@@ -40,7 +40,7 @@ pub(crate) enum TuiEvent {
     Key(KeyEvent),
 }
 
-/// The TUI structure that holds the state of the terminal enviornment as well
+/// The TUI structure that holds the state of the terminal environment as well
 /// as the handling of reading of events from the CrosstermBackend
 pub(crate) struct Tui {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -122,7 +122,7 @@ impl Tui {
 
                 tokio::select! {
                     _ = _cancellation_token.cancelled() => {
-                        debug!(target: "TUI Event reader", "received signal of cancellation token");
+                        debug!(target: "tui", "received signal of cancellation token");
                         break;
                     }
 
@@ -130,20 +130,32 @@ impl Tui {
                         match maybe_event {
                             Some(Ok(CrosstermEvent::Key(key))) => {
                                         if key.kind == KeyEventKind::Press {
-                                            _event_tx.send(TuiEvent::Key(key)).expect("TUI key event send failed");
+                                            if let Err(e) = _event_tx.send(TuiEvent::Key(key)) {
+                                                debug!(target: "tui", "error sending key event: {e}");
+                                                break;
+                                            }
                                         }
                                     }
                             Some(Err(_)) => {
-                                _event_tx.send(TuiEvent::Error).expect("TUI key event error send failed");
+                                if let Err(e) = _event_tx.send(TuiEvent::Error) {
+                                    debug!(target: "tui", "error sending error event: {e}");
+                                    break;
+                                }
                             }
                             _ => {},
                         }
                     }
                     _ = tick_delay => {
-                        _event_tx.send(TuiEvent::Tick).expect("TUI tick event send failed");
+                        if let Err(e) = _event_tx.send(TuiEvent::Tick) {
+                            debug!(target: "tui", "error sending tick event: {e}");
+                            break;
+                        }
                     },
                     _ = render_delay => {
-                        _event_tx.send(TuiEvent::Render).expect("TUI render event send failed");
+                        if let Err(e) = _event_tx.send(TuiEvent::Render) {
+                            debug!(target: "tui", "error sending render event: {e}");
+                            break;
+                        }
                     },
                 }
             }

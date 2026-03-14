@@ -101,7 +101,7 @@ impl ManageConnections {
                     let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
                     let active_nodes = self.active_nodes.read();
 
-                    debug!(target: "manage_connections", "connecting to peer: {}", active_nodes[node_idx]);
+                    debug!(target: "app::manage_connections", "connecting to peer: {}", active_nodes[node_idx]);
 
                     actions.push_back(Action::ConnectTo {
                         peer_one: peer_id,
@@ -112,7 +112,7 @@ impl ManageConnections {
                     let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
                     let active_nodes = self.active_nodes.read();
 
-                    debug!(target: "manage_connections", "disconnecting from peer: {}", active_nodes[node_idx]);
+                    debug!(target: "app::manage_connections", "disconnecting from peer: {}", active_nodes[node_idx]);
 
                     let peer_two = active_nodes[node_idx];
                     if peer_two != peer_id {
@@ -159,14 +159,14 @@ impl ManageConnections {
             .padding(Padding::uniform(1));
 
         if self.node.is_none() {
-            debug!(target: "manage_connections", "no node selected, not rendering");
+            debug!(target: "app::manage_connections", "no node selected, not rendering");
             return;
         }
 
         let active_nodes = self.active_nodes.read();
         let other_nodes: Vec<&PeerId> = active_nodes.iter().collect();
 
-        trace!(target: "manage_connections", "rendering with peer list: {0:#?}", other_nodes);
+        trace!(target: "app::manage_connections", "rendering with peer list: {0:#?}", other_nodes);
 
         if other_nodes.is_empty() {
             Paragraph::new("--- No other peers --- ")
@@ -241,9 +241,9 @@ impl ManageConnections {
                 }
             }
             Action::RemoveNode { peer_id } => {
-                debug!(target: "manage_connections", "Removing peer {0} from peer list", peer_id);
+                debug!(target: "app::manage_connections", "Removing peer {0} from peer list", peer_id);
 
-                debug!(target: "manage_connections", "new peer list: {0:#?}", self.active_nodes);
+                debug!(target: "app::manage_connections", "new peer list: {0:#?}", self.active_nodes);
                 self.remove_peer_from_connections(&peer_id);
                 self.len -= 1;
             }

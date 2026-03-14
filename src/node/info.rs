@@ -14,7 +14,7 @@ pub(crate) struct IdentifyInfo {
 }
 
 impl IdentifyInfo {
-    /// Build a new strucutre holding a node's local identify info
+    /// Build a new structure holding a node's local identify info
     pub fn new(
         public_key: PublicKey,
         protocol_version: String,
@@ -47,7 +47,7 @@ pub(crate) struct KademliaInfo {
 }
 
 impl KademliaInfo {
-    /// Build a new strucutre holding a node's local identify info
+    /// Build a new structure holding a node's local identify info
     pub fn new(mode: Mode, bootstrapped: bool) -> Self {
         Self {
             mode,

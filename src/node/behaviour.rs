@@ -14,7 +14,7 @@ pub(crate) struct NodeBehaviour {
     pub identify: identify::Behaviour,
 }
 
-/// libp2p swarm events for our node behvaiour
+/// libp2p swarm events for our node behaviour
 #[derive(Debug)]
 pub(crate) enum NodeNetworkEvent {
     Identify(identify::Event),
