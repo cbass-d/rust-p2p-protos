@@ -1,6 +1,7 @@
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 use libp2p::Multiaddr;
 use libp2p::PeerId;
@@ -8,6 +9,8 @@ use libp2p::PeerId;
 use crate::node::NodeStats;
 use crate::node::history::MessageHistory;
 use crate::node::info::{IdentifyInfo, KademliaInfo};
+
+pub(crate) type CommandChannel = (NodeCommand, oneshot::Sender<NodeResponse>);
 
 /// Event emitted by the Node Network
 #[derive(Debug)]

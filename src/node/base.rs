@@ -1,13 +1,16 @@
-use libp2p::{Multiaddr, PeerId, Swarm};
-use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
+use color_eyre::{Result, eyre::Context};
+use futures::StreamExt;
+use libp2p::{
+    Multiaddr, PeerId, Swarm,
+    core::transport::ListenerId,
+    kad::{KBucketKey, QueryId, RecordKey, RoutingUpdate},
+    swarm::SwarmEvent,
+};
 
-use crate::{
-    messages::{NetworkEvent, NodeCommand, NodeResponse},
-    node::{
-        behaviour::NodeBehaviour,
-        info::{IdentifyInfo, KademliaInfo},
-    },
+use crate::node::{
+    NodeError,
+    behaviour::{NodeBehaviour, NodeNetworkEvent},
+    info::{IdentifyInfo, KBucketInfo, KademliaInfo},
 };
 
 /// The base structure for a node
@@ -18,7 +21,7 @@ pub(crate) struct NodeBase {
     /// The custom libp2p swarm behaviour
     /// - identify
     /// - kademlia
-    pub(crate) swarm: Swarm<NodeBehaviour>,
+    swarm: Swarm<NodeBehaviour>,
 
     /// Struct to hold local identify info (info that is pushed to other peers)
     pub(crate) identify_info: IdentifyInfo,
@@ -28,13 +31,101 @@ pub(crate) struct NodeBase {
 
     /// libp2p swarm listen address
     pub(crate) listen_address: Multiaddr,
+}
 
-    /// mpsc channel for receiving commands to perform from the network
-    pub(crate) from_network: mpsc::Receiver<(NodeCommand, oneshot::Sender<NodeResponse>)>,
+impl NodeBase {
+    pub fn new(
+        peer_id: PeerId,
+        swarm: Swarm<NodeBehaviour>,
+        identify_info: IdentifyInfo,
+        kad_info: KademliaInfo,
+        listen_address: Multiaddr,
+    ) -> Self {
+        Self {
+            peer_id,
+            swarm,
+            identify_info,
+            kad_info,
+            listen_address,
+        }
+    }
 
-    /// CancellationToken that shared network
-    pub(crate) cancellation_token: CancellationToken,
+    /// Dials a peer using the lip2p swarm
+    pub(crate) fn dial(&mut self, addr: Multiaddr) -> Result<()> {
+        self.swarm.dial(addr).wrap_err("swarm dial failed")?;
+        Ok(())
+    }
 
-    /// mpsc sender for Network Events
-    pub(crate) network_event_tx: mpsc::Sender<NetworkEvent>,
+    /// Disconnect from a swarm peer
+    pub(crate) fn disconnect_peer(&mut self, peer_id: PeerId) -> Result<(), ()> {
+        self.swarm.disconnect_peer_id(peer_id)
+    }
+
+    /// Listens on the swarm address
+    pub(crate) fn listen(&mut self) -> Result<ListenerId, NodeError> {
+        let listener_id = self.swarm.listen_on(self.listen_address.clone())?;
+
+        Ok(listener_id)
+    }
+
+    pub(crate) async fn next_event(&mut self) -> Option<SwarmEvent<NodeNetworkEvent>> {
+        self.swarm.next().await
+    }
+
+    pub(crate) fn kad_remove_peer(&mut self, peer_id: &PeerId) -> Option<()> {
+        if let Some(_) = self.swarm.behaviour_mut().kad.remove_peer(peer_id) {
+            return Some(());
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn kad_bootstrap(&mut self) -> Result<QueryId, NodeError> {
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .bootstrap()
+            .map_err(|e| NodeError::KadBootstrapFailed(e))
+    }
+
+    pub(crate) fn kad_get_providers(&mut self, key: RecordKey) -> QueryId {
+        self.swarm.behaviour_mut().kad.get_providers(key)
+    }
+
+    pub(crate) fn kad_get_closest_peers(&mut self, peer_id: PeerId) -> QueryId {
+        self.swarm.behaviour_mut().kad.get_closest_peers(peer_id)
+    }
+
+    pub(crate) fn kad_get_closest_local_peers(&mut self, peer_id: PeerId) -> Vec<PeerId> {
+        let key = KBucketKey::from(peer_id);
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .get_closest_local_peers(&key)
+            .map(|k| k.into_preimage())
+            .collect()
+    }
+
+    pub(crate) fn kad_kbuckets(&mut self) -> Vec<KBucketInfo> {
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .kbuckets()
+            .map(|kb| KBucketInfo {
+                range: (kb.range().0.0, kb.range().1.0),
+                num_entries: kb.num_entries(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn kad_add_address(
+        &mut self,
+        peer_id: &PeerId,
+        peer_addr: Multiaddr,
+    ) -> RoutingUpdate {
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .add_address(peer_id, peer_addr)
+    }
 }

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use color_eyre::eyre::Result;
 use libp2p::{
     PeerId,
@@ -5,7 +7,7 @@ use libp2p::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::node::{NODE_NETWORK_AGENT, running::RunningNode};
+use crate::node::{NODE_NETWORK_AGENT, history::KadEventInfo, running::RunningNode};
 
 /// Keeping track of important kademlia queries
 #[derive(Default, Debug)]
@@ -19,25 +21,64 @@ pub(crate) struct KadQueries {
 pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<()> {
     match event {
         kad::Event::InboundRequest { request } => {
+            node.logs.write().0.add_kademlia_event(
+                KadEventInfo::InboundRequest {
+                    request: request.clone(),
+                },
+                Instant::now().duration_since(node.start),
+            );
             on_inbound_req(node, request);
         }
         kad::Event::OutboundQueryProgressed {
             result, id, step, ..
         } => {
+            node.logs.write().0.add_kademlia_event(
+                KadEventInfo::OutboundQueryProgressed { id },
+                Instant::now().duration_since(node.start),
+            );
             on_query_result(node, result, id, step);
         }
         kad::Event::RoutingUpdated {
-            peer, addresses, ..
+            peer,
+            addresses,
+            is_new_peer,
+            old_peer,
+            ..
         } => {
+            node.logs.write().0.add_kademlia_event(
+                KadEventInfo::RoutingUpdated {
+                    peer,
+                    is_new: is_new_peer,
+                    addresses: addresses.clone(),
+                    old_peer: old_peer,
+                },
+                Instant::now().duration_since(node.start),
+            );
             debug!(target: "simulation::node::kademlia_events", "route updated for {peer}: {:?}", addresses);
         }
         kad::Event::RoutablePeer { peer, address, .. } => {
+            node.logs.write().0.add_kademlia_event(
+                KadEventInfo::RoutablePeer {
+                    peer,
+                    address: address.clone(),
+                },
+                Instant::now().duration_since(node.start),
+            );
+
             debug!(target: "simulation::node::kademlia_events", "peer {peer} {:?} routable", address);
         }
         kad::Event::PendingRoutablePeer { peer, address, .. } => {
+            node.logs.write().0.add_kademlia_event(
+                KadEventInfo::PendingRoutablePeer { peer },
+                Instant::now().duration_since(node.start),
+            );
             debug!(target: "simulation::node::kademlia_events", "peer {peer} {:?} pending routable", address);
         }
         kad::Event::ModeChanged { new_mode } => {
+            node.logs.write().0.add_kademlia_event(
+                KadEventInfo::ModeChanged { new_mode },
+                Instant::now().duration_since(node.start),
+            );
             info!(target: "simulation::node::kademlia_events", "node mode changed to {new_mode}");
 
             node.base.kad_info.set_mode(new_mode);
@@ -87,7 +128,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
                     // get info about mesh
 
                     let key = RecordKey::new(&NODE_NETWORK_AGENT);
-                    let qid = node.base.swarm.behaviour_mut().kad.get_providers(key);
+                    let qid = node.base.kad_get_providers(key);
 
                     node.kad_queries.get_providers_id = Some(qid);
                 } else {
@@ -125,11 +166,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
                             debug!(target: "simulation::node::kademlia_events", "- {provider}");
 
                             // Get other possible/peers providers
-                            node.base
-                                .swarm
-                                .behaviour_mut()
-                                .kad
-                                .get_closest_peers(*provider);
+                            node.base.kad_get_closest_peers(*provider);
                         }
                         node.kad_queries.get_providers_id = None;
                     }
@@ -139,11 +176,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
                             debug!(target: "simulation::node::kademlia_events", "- {new_peer}");
 
                             // Get other possible/peers providers
-                            node.base
-                                .swarm
-                                .behaviour_mut()
-                                .kad
-                                .get_closest_peers(*new_peer);
+                            node.base.kad_get_closest_peers(*new_peer);
                         }
                     }
                 }

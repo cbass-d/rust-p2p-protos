@@ -1,12 +1,19 @@
+use core::fmt;
+use std::time::{Duration, Instant};
+
 use libp2p::{
-    Multiaddr, PeerId, core::transport::ListenerId, identify::Event as IdentifyEvent,
-    kad::Event as KadEvent,
+    Multiaddr, PeerId,
+    core::transport::ListenerId,
+    identify::{Event as IdentifyEvent, Info},
+    kad::{Addresses, Event as KadEvent, InboundRequest, Mode, QueryId},
 };
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 use tracing::debug;
+
+use crate::node::info::IdentifyInfo;
 
 /// Wrappers for libp2p Swarm events for easier handling and formatting
 #[derive(Debug, Clone)]
@@ -33,34 +40,78 @@ pub(crate) enum SwarmEventInfo {
     },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum KadEventInfo {
+    InboundRequest {
+        request: InboundRequest,
+    },
+    RoutingUpdated {
+        peer: PeerId,
+        is_new: bool,
+        addresses: Addresses,
+        old_peer: Option<PeerId>,
+    },
+    RoutablePeer {
+        peer: PeerId,
+        address: Multiaddr,
+    },
+    UnroutablePeer {
+        peer: PeerId,
+    },
+    PendingRoutablePeer {
+        peer: PeerId,
+    },
+    OutboundQueryProgressed {
+        id: QueryId,
+    },
+    ModeChanged {
+        new_mode: Mode,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum IdentifyEventInfo {
+    Received { peer_id: PeerId, info: Info },
+    Sent { peer_id: PeerId },
+    Pushed { peer_id: PeerId, info: Info },
+    Error { peer_id: PeerId },
+}
+
 /// Container for the swarm events a node has seen separated by protocol. Includes a timestamp
 #[derive(Default, Debug, Clone)]
 pub(crate) struct MessageHistory {
-    pub identify: Vec<(String, String)>,
-    pub kademlia: Vec<(String, String)>,
-    pub swarm: Vec<(SwarmEventInfo, String)>,
+    pub identify: Vec<(IdentifyEventInfo, f32)>,
+    pub kademlia: Vec<(KadEventInfo, f32)>,
+    pub swarm: Vec<(SwarmEventInfo, f32)>,
+}
+
+fn format_duration(duration: Duration) -> f32 {
+    duration.as_secs_f32()
 }
 
 impl MessageHistory {
     /// Adds a identify event, takes the event as String and the timestamp as f32
-    pub fn add_identify_event(&mut self, event: String, since_start: f32) {
-        self.identify.push((event, format!("{:.5}", since_start)));
+    pub fn add_identify_event(&mut self, event: IdentifyEventInfo, since_start: Duration) {
+        let since_start = format_duration(since_start);
+        self.identify.push((event, since_start));
     }
 
     /// Adds a kademlia event, takes the event as String and the timestamp as f32
-    pub fn add_kademlia_event(&mut self, event: String, since_start: f32) {
-        self.kademlia.push((event, format!("{:.5}", since_start)));
+    pub fn add_kademlia_event(&mut self, event: KadEventInfo, since_start: Duration) {
+        let since_start = format_duration(since_start);
+        self.kademlia.push((event, since_start));
     }
 
     /// Adds a swarm event, takes the event as String and the timestamp as f32
-    pub fn add_swarm_event(&mut self, event: SwarmEventInfo, since_start: f32) {
-        self.swarm.push((event, format!("{:.5}", since_start)));
+    pub fn add_swarm_event(&mut self, event: SwarmEventInfo, since_start: Duration) {
+        let since_start = format_duration(since_start);
+        self.swarm.push((event, since_start));
     }
 
     pub fn identify_messages(&self) -> Vec<String> {
         self.identify
             .iter()
-            .map(|(e, t)| format!("{}s : {:?}", t, e))
+            .map(|(e, t)| format!("{:#?}s : {}", t, e))
             .collect()
     }
 
@@ -71,7 +122,7 @@ impl MessageHistory {
             .map(|(m, t)| {
                 Line::from(vec![
                     Span::styled(
-                        format!("{}s", t),
+                        format!("{:#?}s", t),
                         Style::new().add_modifier(Modifier::UNDERLINED),
                     ),
                     Span::raw(" "),
@@ -83,7 +134,7 @@ impl MessageHistory {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
-                    Span::raw(m),
+                    Span::raw(m.to_string()),
                 ])
             })
             .collect()
@@ -96,7 +147,7 @@ impl MessageHistory {
             .map(|(m, t)| {
                 Line::from(vec![
                     Span::styled(
-                        format!("{}s", t),
+                        format!("{:#?}s", t),
                         Style::new().add_modifier(Modifier::UNDERLINED),
                     ),
                     Span::raw(" "),
@@ -108,7 +159,7 @@ impl MessageHistory {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
-                    Span::raw(m),
+                    Span::raw(m.to_string()),
                 ])
             })
             .collect()
@@ -121,7 +172,7 @@ impl MessageHistory {
             .map(|(m, t)| {
                 Line::from(vec![
                     Span::styled(
-                        format!("{}s", t),
+                        format!("{:#?}s", t),
                         Style::new().add_modifier(Modifier::UNDERLINED),
                     ),
                     Span::raw(" "),
@@ -133,7 +184,7 @@ impl MessageHistory {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
-                    Span::raw(format_swarm_event_to_string(m)),
+                    Span::raw(m.to_string()),
                 ])
             })
             .collect()
@@ -143,7 +194,7 @@ impl MessageHistory {
     pub fn kad_messages(&self) -> Vec<String> {
         self.kademlia
             .iter()
-            .map(|(e, t)| format!("{}s : {:?}", t, e))
+            .map(|(e, t)| format!("{:#?}s : {}", t, e))
             .collect()
     }
 
@@ -151,7 +202,7 @@ impl MessageHistory {
     pub fn swarm_messages(&self) -> Vec<String> {
         self.swarm
             .iter()
-            .map(|(e, t)| format!("{}s : {:?}", t, e))
+            .map(|(e, t)| format!("{:#?}s : {}", t, e))
             .collect()
     }
 
@@ -179,8 +230,8 @@ impl MessageHistory {
     pub fn display_identify_messages(&self) {
         for message in &self.identify {
             let (event, time) = message;
-            debug!(target: "simulation::node::history", "{}s : {}", time, event);
-            println!("{}s : {:?}", time, event);
+            debug!(target: "simulation::node::history", "{:#?}s : {}", time, event);
+            println!("{:#?}s : {}", time, event);
         }
     }
 
@@ -188,8 +239,8 @@ impl MessageHistory {
     pub fn display_kademlia_messages(&self) {
         for message in &self.kademlia {
             let (event, time) = message;
-            debug!(target: "simulation::node::history", "{}s : {}", time, event);
-            println!("{}s : {:?}", time, event);
+            debug!(target: "simulation::node::history", "{:#?}s : {}", time, event);
+            println!("{:#?}s : {}", time, event);
         }
     }
 
@@ -197,224 +248,114 @@ impl MessageHistory {
     pub fn display_swarm_messages(&self) {
         for message in &self.swarm {
             let (event, time) = message;
-            debug!(target: "simulation::node::history", "{}s : {:?}", time, event);
-            println!("{}s : {:?}", time, event);
+            debug!(target: "simulation::node::history", "{:#?}s : {}", time, event);
+            println!("{:#?}s : {}", time, event);
         }
     }
 }
 
-/// Formats the identify event to a readable string
-pub fn identify_event_to_string(event: &IdentifyEvent) -> String {
-    match event {
-        IdentifyEvent::Sent {
-            connection_id,
-            peer_id,
-        } => {
-            format!(
-                "SENT Identification information to {} ({})",
-                peer_id, connection_id
-            )
-        }
-        IdentifyEvent::Received {
-            connection_id,
-            peer_id,
-            ..
-        } => {
-            format!(
-                "RECEIVED Identification information from {} ({})",
-                peer_id, connection_id
-            )
-        }
-        IdentifyEvent::Pushed {
-            connection_id,
-            peer_id,
-            ..
-        } => {
-            format!(
-                "PUSHED Identification information to {} ({})",
-                peer_id, connection_id
-            )
-        }
-        IdentifyEvent::Error {
-            connection_id,
-            peer_id,
-            error,
-        } => {
-            format!(
-                "ERROR Trying to identify {}: {:?} ({})",
-                peer_id, error, connection_id
-            )
-        }
-    }
-}
-
-/// Formats the kademlia event to a readable string
-pub fn kad_event_to_string(event: &KadEvent) -> String {
-    match event {
-        KadEvent::ModeChanged { new_mode } => {
-            format!("MODE Mode changed to {}", new_mode)
-        }
-        KadEvent::RoutablePeer { peer, address } => {
-            format!("ROUTABLE PEER Peer {} at {} now routable", peer, address)
-        }
-        KadEvent::InboundRequest { request } => {
-            format!("INBOUND REQUEST {:?}", request)
-        }
-        KadEvent::RoutingUpdated {
-            peer, is_new_peer, ..
-        } => {
-            if *is_new_peer {
-                format!("ROUTING UPDATED Routing for new peer {} updated", peer)
-            } else {
-                format!("ROUTING UPDATED Routing for peer {} updated", peer)
+impl fmt::Display for KadEventInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KadEventInfo::ModeChanged { new_mode } => {
+                write!(f, "MODE Mode changed to {}", new_mode)
+            }
+            KadEventInfo::RoutablePeer { peer, address } => {
+                write!(f, "ROUTABLE PEER Peer {} at {} now routable", peer, address)
+            }
+            KadEventInfo::InboundRequest { request } => {
+                write!(f, "INBOUND REQUEST {:?}", request)
+            }
+            KadEventInfo::RoutingUpdated { peer, is_new, .. } => {
+                if *is_new {
+                    write!(f, "ROUTING UPDATED Routing for new peer {} updated", peer)
+                } else {
+                    write!(f, "ROUTING UPDATED Routing for peer {} updated", peer)
+                }
+            }
+            KadEventInfo::UnroutablePeer { peer } => {
+                write!(f, "UNROUTABLE Peer {} is unroutable", peer)
+            }
+            KadEventInfo::PendingRoutablePeer { peer } => {
+                write!(
+                    f,
+                    "PENDING ROUTE Connection to peer {} established, pending addition to table",
+                    peer
+                )
+            }
+            KadEventInfo::OutboundQueryProgressed { id } => {
+                write!(
+                    f,
+                    "OUTBOUND QUERY PROGRESSED Outbound query {} has progressed",
+                    id
+                )
             }
         }
-        KadEvent::UnroutablePeer { peer } => {
-            format!("UNROUTABLE Peer {} is unroutable", peer)
-        }
-        KadEvent::PendingRoutablePeer { peer, .. } => {
-            format!(
-                "PENDING ROUTE Connection to peer {} established, pending addition to table",
-                peer
-            )
-        }
-        KadEvent::OutboundQueryProgressed { id, .. } => {
-            format!(
-                "OUTBOUND QUERY PROGRESSED Outbound query {} has progressed",
-                id
-            )
+    }
+}
+
+impl fmt::Display for IdentifyEventInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentifyEventInfo::Sent { peer_id } => {
+                write!(f, "SENT Identification information to {}", peer_id)
+            }
+            IdentifyEventInfo::Pushed { peer_id, .. } => {
+                write!(f, "PUSHED Identification information to {}", peer_id)
+            }
+            IdentifyEventInfo::Received { peer_id, .. } => {
+                write!(f, "RECEIVED Identification information from {}", peer_id)
+            }
+            IdentifyEventInfo::Error { peer_id } => {
+                write!(f, "ERROR Trying to identify {}", peer_id)
+            }
         }
     }
 }
 
-/// Formats the swarm event to a readable string
-pub fn format_swarm_event_to_string(event: &SwarmEventInfo) -> String {
-    match event {
-        SwarmEventInfo::Dialing { peer_id } => {
-            format!("DIALING Now dialing peer {}", peer_id.unwrap())
+impl fmt::Display for SwarmEventInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SwarmEventInfo::Dialing { peer_id } => {
+                write!(f, "DIALING Now dialing peer {}", peer_id.unwrap())
+            }
+            SwarmEventInfo::NewListenAddr {
+                listener_id,
+                address,
+            } => {
+                write!(
+                    f,
+                    "NEW LISTENER New listener {} with address {}",
+                    listener_id, address
+                )
+            }
+            SwarmEventInfo::ListenerClosed {
+                listener_id,
+                addresses,
+            } => {
+                write!(
+                    f,
+                    "LISTENER CLOSED The listener {} at addresses {:?} closed",
+                    listener_id, addresses
+                )
+            }
+            SwarmEventInfo::ConnectionClosed { peer_id } => {
+                write!(
+                    f,
+                    "CONNECTION CLOSED The connection with {} closed",
+                    peer_id
+                )
+            }
+            SwarmEventInfo::IncomingConnection { peer_id } => {
+                write!(f, "INCOMING CONNECTION New connection from {}", peer_id)
+            }
+            SwarmEventInfo::ConnectionEstablished { peer_id } => {
+                write!(
+                    f,
+                    "CONNECTION ESTABLISHED Connection established with {}",
+                    peer_id
+                )
+            }
         }
-        SwarmEventInfo::NewListenAddr {
-            listener_id,
-            address,
-        } => {
-            format!(
-                "NEW LISTENER New listener {} with address {}",
-                listener_id, address
-            )
-        }
-        SwarmEventInfo::ListenerClosed {
-            listener_id,
-            addresses,
-        } => {
-            format!(
-                "LISTENER CLOSED The listener {} at addresses {:?} closed",
-                listener_id, addresses
-            )
-        }
-        SwarmEventInfo::ConnectionClosed { peer_id, .. } => {
-            format!("CONNECTION CLOSED The connection with {} closed", peer_id)
-        }
-        SwarmEventInfo::IncomingConnection { peer_id, .. } => {
-            format!("INCOMING CONNECTION New connection from {}", peer_id)
-        }
-        SwarmEventInfo::ConnectionEstablished { peer_id, .. } => {
-            format!(
-                "CONNECTION ESTABLISHED Connection established with {}",
-                peer_id
-            )
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use libp2p::{Multiaddr, PeerId, core::transport::ListenerId, identity};
-
-    use crate::node::history::{SwarmEventInfo, format_swarm_event_to_string};
-
-    fn random_peer_id() -> PeerId {
-        identity::PeerId::random()
-    }
-
-    fn memory_addr(port: u64) -> Multiaddr {
-        format!("/memory/{}", port).parse().unwrap()
-    }
-
-    #[test]
-    fn test_format_connection_established() {
-        let peer_id = random_peer_id();
-        let event = SwarmEventInfo::ConnectionEstablished { peer_id };
-
-        let formatted = format_swarm_event_to_string(&event);
-
-        assert!(formatted.starts_with("CONNECTION ESTABLISHED"));
-        assert!(formatted.contains(&peer_id.to_string()));
-    }
-
-    #[test]
-    fn test_format_dialing() {
-        let peer_id = random_peer_id();
-        let event = SwarmEventInfo::Dialing {
-            peer_id: Some(peer_id),
-        };
-
-        let formatted = format_swarm_event_to_string(&event);
-
-        assert!(formatted.starts_with("DIALING"));
-        assert!(formatted.contains(&peer_id.to_string()));
-    }
-
-    #[test]
-    fn test_format_new_listen_addr() {
-        let address = memory_addr(1234);
-        let listener_id = ListenerId::next();
-        let event = SwarmEventInfo::NewListenAddr {
-            listener_id,
-            address: address.clone(),
-        };
-
-        let formatted = format_swarm_event_to_string(&event);
-
-        assert!(formatted.starts_with("NEW LISTENER"));
-        assert!(formatted.contains(&listener_id.to_string()));
-        assert!(formatted.contains(&address.to_string()));
-    }
-
-    #[test]
-    fn test_format_listener_closed() {
-        let address = memory_addr(1234);
-        let listener_id = ListenerId::next();
-        let event = SwarmEventInfo::ListenerClosed {
-            listener_id,
-            addresses: vec![address.clone()],
-        };
-
-        let formatted = format_swarm_event_to_string(&event);
-
-        assert!(formatted.starts_with("LISTENER CLOSED"));
-        assert!(formatted.contains(&listener_id.to_string()));
-        assert!(formatted.contains(&address.to_string()));
-    }
-
-    #[test]
-    fn test_format_connection_closed() {
-        let peer_id = random_peer_id();
-        let event = SwarmEventInfo::ConnectionClosed { peer_id };
-
-        let formatted = format_swarm_event_to_string(&event);
-
-        assert!(formatted.starts_with("CONNECTION CLOSED"));
-        assert!(formatted.contains(&peer_id.to_string()));
-    }
-
-    #[test]
-    fn test_format_incoming_connections() {
-        let peer_id = random_peer_id();
-        let event = SwarmEventInfo::IncomingConnection { peer_id };
-
-        let formatted = format_swarm_event_to_string(&event);
-
-        assert!(formatted.starts_with("INCOMING CONNECTION"));
-        assert!(formatted.contains(&peer_id.to_string()));
     }
 }

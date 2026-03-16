@@ -1,5 +1,5 @@
 use parking_lot::RwLock;
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 use libp2p::{
     Multiaddr, Swarm, Transport,
@@ -16,11 +16,12 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    messages::{NetworkEvent, NodeCommand, NodeResponse},
+    messages::{CommandChannel, NetworkEvent, NodeCommand, NodeResponse},
     node::{
         IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError, NodeStats,
         base::NodeBase,
         behaviour::NodeBehaviour,
+        connection_tracker::ConnectionTracker,
         history::MessageHistory,
         info::{IdentifyInfo, KademliaInfo},
         kad_handler::KadQueries,
@@ -35,6 +36,15 @@ pub(crate) struct ConfiguredNode {
 
     /// The peers the node knows at build time
     known_peers: Vec<Multiaddr>,
+
+    /// CancellationToken that shared network
+    cancellation_token: CancellationToken,
+
+    /// mpsc sender for Network Events
+    network_event_tx: mpsc::Sender<NetworkEvent>,
+
+    /// mpsc channel for receiving commands to perform from the network
+    from_network: mpsc::Receiver<CommandChannel>,
 }
 
 impl ConfiguredNode {
@@ -48,7 +58,7 @@ impl ConfiguredNode {
         ),
         NodeError,
     > {
-        // Build the mpsc channel where the channel will be receiving messages from
+        // Build the mpsc channel where the node will be receiving commands from
         let (tx, rx) = mpsc::channel(100);
 
         let node_keys = identity::Keypair::generate_ed25519();
@@ -89,20 +99,14 @@ impl ConfiguredNode {
 
         let kad_info = KademliaInfo::new(swarm.behaviour().kad.mode(), false);
 
-        let base = NodeBase {
-            peer_id,
-            swarm,
-            identify_info,
-            kad_info,
-            listen_address,
-            from_network: rx,
-            network_event_tx,
-            cancellation_token,
-        };
+        let base = NodeBase::new(peer_id, swarm, identify_info, kad_info, listen_address);
 
         let node = ConfiguredNode {
             base,
             known_peers: vec![],
+            cancellation_token,
+            network_event_tx,
+            from_network: rx,
         };
 
         Ok((node, tx))
@@ -110,6 +114,8 @@ impl ConfiguredNode {
 
     /// Transitions from ConfiguredNode to a RunningNode instance consuming itself
     pub fn start(self) -> RunningNode {
+        let mut connection_tracker = ConnectionTracker::default();
+        connection_tracker.set_known(self.known_peers);
         RunningNode {
             base: self.base,
             quit: false,
@@ -121,8 +127,10 @@ impl ConfiguredNode {
             ))),
             kad_queries: KadQueries::default(),
             bootstrapped: false,
-            current_peers: Arc::new(RwLock::new(HashSet::new())),
-            known_peers: self.known_peers,
+            connection_tracker,
+            cancellation_token: self.cancellation_token,
+            from_network: self.from_network,
+            network_event_tx: self.network_event_tx,
         }
     }
 }
