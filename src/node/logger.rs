@@ -4,7 +4,7 @@ use parking_lot::RwLock;
 
 use crate::node::{
     NodeStats,
-    history::{IdentifyEventInfo, KadEventInfo, MessageHistory, SwarmEventInfo},
+    history::{IdentifyEventInfo, KadEventInfo, LogMessage, MessageHistory, SwarmEventInfo},
 };
 
 #[derive(Default)]
@@ -22,6 +22,16 @@ impl NodeLogger {
         self.node_stats.clone()
     }
 
+    pub fn total_recvd(&self) -> u64 {
+        let stats = self.node_stats.read();
+        stats.recvd_count
+    }
+
+    pub fn increment_sent(&mut self) {
+        let mut stats = self.node_stats.write();
+        stats.recvd_count += 1
+    }
+
     pub fn add_swarm_event(&mut self, event: SwarmEventInfo, duration: Duration) {
         let mut message_history = self.message_history.write();
         message_history.add_swarm_event(event, duration);
@@ -37,8 +47,9 @@ impl NodeLogger {
         message_history.add_identify_event(event, duration);
     }
 
-    pub fn increment_sent(&mut self) {
-        let mut stats = self.node_stats.write();
-        stats.recvd_count += 1
+    pub fn all_messages(&self) -> Vec<LogMessage> {
+        let messages = self.message_history.read();
+
+        messages.all_messages()
     }
 }

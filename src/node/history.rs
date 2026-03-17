@@ -1,11 +1,11 @@
 use core::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use libp2p::{
     Multiaddr, PeerId,
     core::transport::ListenerId,
-    identify::{Event as IdentifyEvent, Info},
-    kad::{Addresses, Event as KadEvent, InboundRequest, Mode, QueryId},
+    identify::Info,
+    kad::{Addresses, InboundRequest, Mode, QueryId},
 };
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -13,7 +13,11 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::node::info::IdentifyInfo;
+pub(crate) enum LogMessage {
+    Swarm { event: SwarmEventInfo, at: f32 },
+    Kad { event: KadEventInfo, at: f32 },
+    Identify { event: IdentifyEventInfo, at: f32 },
+}
 
 /// Wrappers for libp2p Swarm events for easier handling and formatting
 #[derive(Debug, Clone)]
@@ -108,116 +112,131 @@ impl MessageHistory {
         self.swarm.push((event, since_start));
     }
 
-    pub fn identify_messages(&self) -> Vec<String> {
-        self.identify
-            .iter()
-            .map(|(e, t)| format!("{:#?}s : {}", t, e))
-            .collect()
+    pub(crate) fn format_kad_message(&self, event: &KadEventInfo, time: f32) -> Line<'_> {
+        Line::from(vec![
+            Span::styled(
+                format!("{:#?}s", time),
+                Style::new().add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                "KAD",
+                Style::new()
+                    .bg(Color::Blue)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::raw(event.to_string()),
+        ])
     }
 
-    /// Returns the Identify messages as pretty and formatted ratatui Lines
-    pub fn identify_messages_formatted(&self) -> Vec<Line<'_>> {
-        self.identify
-            .iter()
-            .map(|(m, t)| {
-                Line::from(vec![
-                    Span::styled(
-                        format!("{:#?}s", t),
-                        Style::new().add_modifier(Modifier::UNDERLINED),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        "Identify",
-                        Style::new()
-                            .bg(Color::Green)
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::raw(m.to_string()),
-                ])
-            })
-            .collect()
+    pub(crate) fn format_swarm_message(&self, event: &SwarmEventInfo, time: f32) -> Line<'_> {
+        Line::from(vec![
+            Span::styled(
+                format!("{:#?}s", time),
+                Style::new().add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                "SWARM",
+                Style::new()
+                    .bg(Color::Yellow)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::raw(event.to_string()),
+        ])
     }
 
-    /// Returns the Kademlia messages as pretty and formatted ratatui Lines
-    pub fn kad_messages_formatted(&self) -> Vec<Line<'_>> {
-        self.kademlia
-            .iter()
-            .map(|(m, t)| {
-                Line::from(vec![
-                    Span::styled(
-                        format!("{:#?}s", t),
-                        Style::new().add_modifier(Modifier::UNDERLINED),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        "Kademlia",
-                        Style::new()
-                            .bg(Color::Blue)
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::raw(m.to_string()),
-                ])
-            })
-            .collect()
-    }
-
-    /// Returns the Swarm messages as pretty and formatted ratatui Lines
-    pub fn swarm_messages_formatted(&self) -> Vec<Line<'_>> {
-        self.swarm
-            .iter()
-            .map(|(m, t)| {
-                Line::from(vec![
-                    Span::styled(
-                        format!("{:#?}s", t),
-                        Style::new().add_modifier(Modifier::UNDERLINED),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        "SWARM",
-                        Style::new()
-                            .bg(Color::Yellow)
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::raw(m.to_string()),
-                ])
-            })
-            .collect()
+    pub(crate) fn format_identify_message(&self, event: &IdentifyEventInfo, time: f32) -> Line<'_> {
+        Line::from(vec![
+            Span::styled(
+                format!("{:#?}s", time),
+                Style::new().add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                "IDENTIFY",
+                Style::new()
+                    .bg(Color::Green)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::raw(event.to_string()),
+        ])
     }
 
     /// Returns kademlia messages as strings
-    pub fn kad_messages(&self) -> Vec<String> {
+    pub fn kad_messages(&self) -> Vec<LogMessage> {
         self.kademlia
             .iter()
-            .map(|(e, t)| format!("{:#?}s : {}", t, e))
+            .map(|(e, t)| LogMessage::Kad {
+                event: e.to_owned(),
+                at: t.to_owned(),
+            })
+            .collect()
+    }
+
+    pub fn identify_messages(&self) -> Vec<LogMessage> {
+        self.identify
+            .iter()
+            .map(|(e, t)| LogMessage::Identify {
+                event: e.to_owned(),
+                at: t.to_owned(),
+            })
             .collect()
     }
 
     /// Returns swarm messages as strings
-    pub fn swarm_messages(&self) -> Vec<String> {
+    pub fn swarm_messages(&self) -> Vec<LogMessage> {
         self.swarm
             .iter()
-            .map(|(e, t)| format!("{:#?}s : {}", t, e))
+            .map(|(e, t)| LogMessage::Swarm {
+                event: e.to_owned(),
+                at: t.to_owned(),
+            })
             .collect()
     }
 
     /// Returns all messages as pretty and formatted ratatui Lines
     pub fn all_messages_formatted(&self) -> Vec<Line<'_>> {
         let mut messages = vec![];
-        messages.append(&mut self.identify_messages_formatted());
-        messages.append(&mut self.kad_messages_formatted());
-        messages.append(&mut self.swarm_messages_formatted());
+        messages.append(&mut self.kad_messages());
+        messages.append(&mut self.identify_messages());
+        messages.append(&mut self.swarm_messages());
+
+        messages.sort_by(|a, b| {
+            let a_time = match a {
+                LogMessage::Swarm { at, .. } => at,
+                LogMessage::Kad { at, .. } => at,
+                LogMessage::Identify { at, .. } => at,
+            };
+            let b_time = match b {
+                LogMessage::Swarm { at, .. } => at,
+                LogMessage::Kad { at, .. } => at,
+                LogMessage::Identify { at, .. } => at,
+            };
+
+            a_time
+                .partial_cmp(b_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         messages
+            .iter()
+            .map(|m| match m {
+                LogMessage::Kad { event, at } => self.format_kad_message(event, *at),
+                LogMessage::Swarm { event, at } => self.format_swarm_message(event, *at),
+                LogMessage::Identify { event, at } => self.format_identify_message(event, *at),
+            })
+            .collect()
     }
 
     /// Returns all messages as strings
-    pub fn all_messages(&self) -> Vec<String> {
+    pub fn all_messages(&self) -> Vec<LogMessage> {
         let mut messages = vec![];
         messages.append(&mut self.identify_messages());
         messages.append(&mut self.kad_messages());

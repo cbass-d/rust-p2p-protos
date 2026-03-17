@@ -126,7 +126,7 @@ impl NodeLog {
             };
 
             let block = block
-                .title_bottom(format!("Total swarm events: {}", stats.recvd_count))
+                .title_bottom(format!("Total swarm events: {}", stats.total_recvd()))
                 .title_alignment(Alignment::Center);
 
             let all_messages = messages.all_messages_formatted();

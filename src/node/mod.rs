@@ -8,6 +8,7 @@ pub mod info;
 mod kad_handler;
 mod logger;
 pub mod running;
+mod state;
 
 use core::fmt;
 use libp2p::StreamProtocol;
@@ -40,8 +41,26 @@ pub(crate) enum NodeResult {
 /// The number of messages/swarm events the node has sent and received
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NodeStats {
-    pub recvd_count: u64,
-    pub sent_count: u64,
+    recvd_count: u64,
+    sent_count: u64,
+}
+
+impl NodeStats {
+    pub(crate) fn total_recvd(&self) -> u64 {
+        self.recvd_count
+    }
+
+    pub(crate) fn total_sent(&self) -> u64 {
+        self.sent_count
+    }
+
+    pub(crate) fn inc_recvd(&mut self) {
+        self.recvd_count += 1;
+    }
+
+    pub(crate) fn inc_sent(&mut self) {
+        self.sent_count += 1;
+    }
 }
 
 impl fmt::Display for NodeStats {

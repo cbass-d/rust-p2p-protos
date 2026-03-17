@@ -1,22 +1,21 @@
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use std::time::Instant;
 
 use color_eyre::eyre::Result;
-use libp2p::{Multiaddr, PeerId, core::ConnectedPoint, swarm::SwarmEvent};
-use parking_lot::RwLock;
+use libp2p::{core::ConnectedPoint, swarm::SwarmEvent};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     messages::{CommandChannel, NetworkEvent, NodeCommand, NodeResponse},
     node::{
-        NodeError, NodeResult, NodeStats,
+        NodeError, NodeResult,
         base::NodeBase,
         behaviour::NodeNetworkEvent,
         connection_tracker::ConnectionTracker,
-        history::{MessageHistory, SwarmEventInfo},
+        history::SwarmEventInfo,
         identify_handler,
         kad_handler::{self, KadQueries},
         logger::NodeLogger,
+        state::State,
     },
 };
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -29,35 +28,20 @@ pub(crate) struct RunningNode {
     /// Manages the active connections to other peers in the libp2p swarm
     pub(crate) connection_tracker: ConnectionTracker,
 
+    /// Manages the state of the node
+    pub(crate) state: State,
+
     /// mpsc channel for receiving commands to perform from the network
     pub(crate) from_network: mpsc::Receiver<CommandChannel>,
 
-    /// CancellationToken that shared network
-    pub(crate) cancellation_token: CancellationToken,
-
     /// mpsc sender for Network Events
     pub(crate) network_event_tx: mpsc::Sender<NetworkEvent>,
-
-    /// Flag for stopping the node
-    pub(crate) quit: bool,
-
-    /// Node killed by network command
-    pub(crate) killed: bool,
-
-    /// Instant when the node started running
-    pub(crate) start: Instant,
-
-    /// Logs for libp2p swarm events
-    pub(crate) logs: Arc<RwLock<(MessageHistory, NodeStats)>>,
 
     /// Handler for logging of events
     pub(crate) logger: NodeLogger,
 
     /// Important kad queries that we must keep track of
     pub(crate) kad_queries: KadQueries,
-
-    /// Flag for the status of the Kademlia bootstrap process
-    pub(crate) bootstrapped: bool,
 }
 
 impl RunningNode {
@@ -84,13 +68,14 @@ impl RunningNode {
         }
 
         self.base.listen()?;
+
         info!(target: "simulation::node", "node swarm listening on {}", self.base.listen_address);
 
         self.dial_known_peers();
 
-        while !self.quit {
+        while !self.state.stopped() {
             tokio::select! {
-                _ = self.cancellation_token.cancelled() => {
+                _ = self.state.cancelled() => {
                     debug!(target: "simulation::node", "cancellation token signal received");
                     break;
                 },
@@ -101,7 +86,6 @@ impl RunningNode {
                 maybe_event = self.base.next_event() => {
                     if let Some(event) = maybe_event {
                         trace!("node swarm event {:?}", event);
-                        self.logs.write().1.recvd_count += 1;
 
                         self.handle_swarm_event(event, self.network_event_tx.clone()).await;
                     } else {
@@ -125,7 +109,7 @@ impl RunningNode {
             warn!(target: "simulation::node", "failed to send node stopped event: {e}");
         }
 
-        if self.killed {
+        if self.state.killed() {
             Ok(NodeResult::Killed)
         } else {
             Ok(NodeResult::Success)
@@ -148,26 +132,22 @@ impl RunningNode {
         info!(target: "simulation::node", "dialed a total of {} peers", dialed);
     }
 
-    /// Whether the node has completed the Kademlia bootstrap process
-    pub fn is_bootstrapped(&self) -> bool {
-        self.bootstrapped
-    }
-
     /// Handle a message coming from the node network
     fn handle_network_message(&mut self, message: CommandChannel) {
         let (command, reply_tx) = message;
-        if let Some(response) = self.handle_node_command(command) {
-            if let Err(e) = reply_tx.send(response) {
-                warn!(target: "simulation::node", "failed to send command response: {e:#?}");
-            }
+        let response = self.handle_node_command(command);
+        if let Err(e) = reply_tx.send(response) {
+            warn!(target: "simulation::node", "failed to send command response: {e:#?}");
         }
     }
+
     async fn handle_swarm_event(
         &mut self,
         event: SwarmEvent<NodeNetworkEvent>,
         network_event_tx: mpsc::Sender<NetworkEvent>,
     ) {
-        let start = self.start;
+        let start = self.state.start();
+
         self.logger.increment_sent();
         match event {
             SwarmEvent::Dialing { peer_id, .. } => {
@@ -215,7 +195,7 @@ impl RunningNode {
                     warn!(target: "simulation::node", "failed to send nodes connected event: {e}");
                 }
 
-                if !self.bootstrapped {
+                if !self.state.bootstrapped() {
                     debug!(target: "simulation::node::kademlia_events", "attempting kademlia bootstrapping");
                     if let Ok(qid) = self.base.kad_bootstrap() {
                         debug!(target: "simulation::node::kademlia_events", "kademlia bootstrap started");
@@ -297,49 +277,53 @@ impl RunningNode {
     }
 
     // Handles an incoming node command from the node network, returns the NodeResponse if any
-    fn handle_node_command(&mut self, command: NodeCommand) -> Option<NodeResponse> {
+    fn handle_node_command(&mut self, command: NodeCommand) -> NodeResponse {
         match command {
             NodeCommand::ConnectTo { peer } => {
                 debug!(target: "simulation::node", "connect to command received: {peer}");
                 match self.base.dial(peer.clone()) {
                     Ok(()) => {
                         debug!(target: "simulation::node", "successfully dialed peer {peer}");
+
+                        NodeResponse::Dialed { addr: peer }
                     }
                     Err(e) => {
                         warn!(target: "simulation::node", "failed to dial peer {peer}: {e}");
+
+                        NodeResponse::Failed
                     }
                 }
-
-                None
             }
             NodeCommand::DisconnectFrom { peer } => {
                 debug!(target: "simulation::node", "disconnect from command received: {peer}");
                 if self.base.disconnect_peer(peer).is_ok() {
                     debug!(target: "simulation::node", "successfully disconnected from {peer}");
+
+                    NodeResponse::Disconnected { peer }
                 } else {
                     warn!(target: "simulation::node", "failed to disconnect from {peer}");
-                }
 
-                Some(NodeResponse::Disconnected { peer })
+                    NodeResponse::Failed
+                }
             }
             NodeCommand::GetIdentifyInfo => {
                 let info = self.base.identify_info.clone();
 
-                Some(NodeResponse::IdentifyInfo { info })
+                NodeResponse::IdentifyInfo { info }
             }
             NodeCommand::GetKademliaInfo => {
                 self.update_kademlia_info();
                 let info = self.base.kad_info.clone();
 
-                Some(NodeResponse::KademliaInfo { info })
+                NodeResponse::KademliaInfo { info }
             }
             NodeCommand::Stop => {
                 debug!(target: "simulation::node", "stop command received");
 
-                self.quit = true;
-                self.killed = true;
+                self.state.stop();
+                self.state.kill();
 
-                None
+                NodeResponse::Stopped
             }
         }
     }
@@ -378,13 +362,12 @@ mod tests {
         let node = configured_node.start();
 
         // Validate the new node is in the proper state
-        assert!(!node.is_bootstrapped());
-        assert!(!node.quit);
+        assert!(!node.state.bootstrapped());
+        assert!(!node.state.stopped());
         assert_eq!(node.connection_tracker.connection_count(), 0);
         assert_eq!(node.connection_tracker.known_peers_count(), 0);
-        assert!(node.logs.read().0.all_messages().is_empty());
-        assert!(node.logs.read().1.recvd_count == 0);
-        assert!(node.logs.read().1.sent_count == 0);
+        assert_eq!(node.logger.total_recvd(), 0);
+        assert_eq!(node.logger.all_messages().len(), 0);
 
         assert_eq!(
             node.base.identify_info.public_key.to_peer_id(),

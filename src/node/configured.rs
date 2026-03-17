@@ -1,5 +1,4 @@
-use parking_lot::RwLock;
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 
 use libp2p::{
     Multiaddr, Swarm, Transport,
@@ -18,15 +17,15 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     messages::{CommandChannel, NetworkEvent, NodeCommand, NodeResponse},
     node::{
-        IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError, NodeStats,
+        IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError,
         base::NodeBase,
         behaviour::NodeBehaviour,
         connection_tracker::ConnectionTracker,
-        history::MessageHistory,
         info::{IdentifyInfo, KademliaInfo},
         kad_handler::KadQueries,
         logger::NodeLogger,
         running::RunningNode,
+        state::State,
     },
 };
 
@@ -119,18 +118,10 @@ impl ConfiguredNode {
         connection_tracker.set_known(self.known_peers);
         RunningNode {
             base: self.base,
-            quit: false,
-            killed: false,
-            start: Instant::now(),
-            logs: Arc::new(RwLock::new((
-                MessageHistory::default(),
-                NodeStats::default(),
-            ))),
             logger: NodeLogger::default(),
             kad_queries: KadQueries::default(),
-            bootstrapped: false,
             connection_tracker,
-            cancellation_token: self.cancellation_token,
+            state: State::new(Instant::now(), self.cancellation_token),
             from_network: self.from_network,
             network_event_tx: self.network_event_tx,
         }

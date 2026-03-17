@@ -17,7 +17,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
                     peer_id,
                     info: info.clone(),
                 },
-                Instant::now().duration_since(node.start),
+                Instant::now().duration_since(node.state.start()),
             );
 
             if info.agent_version == NODE_NETWORK_AGENT
@@ -37,7 +37,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
         Event::Sent { peer_id, .. } => {
             node.logger.add_identify_event(
                 IdentifyEventInfo::Sent { peer_id },
-                Instant::now().duration_since(node.start),
+                Instant::now().duration_since(node.state.start()),
             );
 
             debug!(target: "simulation::node::identify_events", "identify sent event to {peer_id}");
@@ -48,7 +48,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
                     peer_id,
                     info: info.clone(),
                 },
-                Instant::now().duration_since(node.start),
+                Instant::now().duration_since(node.state.start()),
             );
 
             debug!(target: "simulation::node::identify_events", "identify pushed event to {peer_id} {:?}", info);
@@ -57,7 +57,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
             libp2p::swarm::StreamUpgradeError::Timeout => {
                 node.logger.add_identify_event(
                     IdentifyEventInfo::Error { peer_id },
-                    Instant::now().duration_since(node.start),
+                    Instant::now().duration_since(node.state.start()),
                 );
 
                 node.base.kad_remove_peer(&peer_id);
@@ -65,7 +65,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
             _ => {
                 node.logger.add_identify_event(
                     IdentifyEventInfo::Error { peer_id },
-                    Instant::now().duration_since(node.start),
+                    Instant::now().duration_since(node.state.start()),
                 );
 
                 debug!(target: "simulation::node::identify_events", "identify error: {error}");

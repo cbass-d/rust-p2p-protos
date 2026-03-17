@@ -94,4 +94,13 @@ pub(crate) enum NodeResponse {
 
     /// Disconnected from peer
     Disconnected { peer: PeerId },
+
+    /// Connected to peer
+    Dialed { addr: Multiaddr },
+
+    /// Node stopped
+    Stopped,
+
+    /// Node command failed
+    Failed,
 }
