@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct NodeLog {
-    selected: Option<Arc<RwLock<(MessageHistory, NodeStats)>>>,
+    selected: Option<(Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
     pub list_state: ListState,
     pub scrollbar_state: ScrollbarState,
 
@@ -119,10 +119,11 @@ impl NodeLog {
         };
 
         if let Some(selected) = &self.selected {
-            let messages_and_stats = selected.read();
+            let (messages, stats) = {
+                let (messages_lock, stats_lock) = selected;
 
-            let messages = &messages_and_stats.0;
-            let stats = &messages_and_stats.1;
+                (messages_lock.read(), stats_lock.read())
+            };
 
             let block = block
                 .title_bottom(format!("Total swarm events: {}", stats.recvd_count))
@@ -158,7 +159,10 @@ impl NodeLog {
         }
     }
 
-    pub fn display_logs(&mut self, message_and_stats: Arc<RwLock<(MessageHistory, NodeStats)>>) {
+    pub fn display_logs(
+        &mut self,
+        message_and_stats: (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>),
+    ) {
         self.selected = Some(message_and_stats);
     }
 }

@@ -11,7 +11,8 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
     match event {
         Event::Received { peer_id, info, .. } => {
             debug!(target: "simulation::node::identify_events", "identify recv event {:?}", info);
-            node.logs.write().0.add_identify_event(
+
+            node.logger.add_identify_event(
                 IdentifyEventInfo::Received {
                     peer_id,
                     info: info.clone(),
@@ -34,35 +35,39 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
             }
         }
         Event::Sent { peer_id, .. } => {
-            node.logs.write().0.add_identify_event(
+            node.logger.add_identify_event(
                 IdentifyEventInfo::Sent { peer_id },
                 Instant::now().duration_since(node.start),
             );
+
             debug!(target: "simulation::node::identify_events", "identify sent event to {peer_id}");
         }
         Event::Pushed { peer_id, info, .. } => {
-            node.logs.write().0.add_identify_event(
-                IdentifyEventInfo::Received {
+            node.logger.add_identify_event(
+                IdentifyEventInfo::Pushed {
                     peer_id,
                     info: info.clone(),
                 },
                 Instant::now().duration_since(node.start),
             );
+
             debug!(target: "simulation::node::identify_events", "identify pushed event to {peer_id} {:?}", info);
         }
         Event::Error { peer_id, error, .. } => match error {
             libp2p::swarm::StreamUpgradeError::Timeout => {
-                node.logs.write().0.add_identify_event(
+                node.logger.add_identify_event(
                     IdentifyEventInfo::Error { peer_id },
                     Instant::now().duration_since(node.start),
                 );
+
                 node.base.kad_remove_peer(&peer_id);
             }
             _ => {
-                node.logs.write().0.add_identify_event(
+                node.logger.add_identify_event(
                     IdentifyEventInfo::Error { peer_id },
                     Instant::now().duration_since(node.start),
                 );
+
                 debug!(target: "simulation::node::identify_events", "identify error: {error}");
             }
         },

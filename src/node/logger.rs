@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use parking_lot::RwLock;
 
 use crate::node::{
     NodeStats,
-    history::{MessageHistory, SwarmEventInfo},
+    history::{IdentifyEventInfo, KadEventInfo, MessageHistory, SwarmEventInfo},
 };
 
 #[derive(Default)]
@@ -22,6 +22,23 @@ impl NodeLogger {
         self.node_stats.clone()
     }
 
-    pub fn add_swarm_event(&mut self, event: SwarmEventInfo) {}
-}
+    pub fn add_swarm_event(&mut self, event: SwarmEventInfo, duration: Duration) {
+        let mut message_history = self.message_history.write();
+        message_history.add_swarm_event(event, duration);
+    }
 
+    pub fn add_kademlia_event(&mut self, event: KadEventInfo, duration: Duration) {
+        let mut message_history = self.message_history.write();
+        message_history.add_kademlia_event(event, duration);
+    }
+
+    pub fn add_identify_event(&mut self, event: IdentifyEventInfo, duration: Duration) {
+        let mut message_history = self.message_history.write();
+        message_history.add_identify_event(event, duration);
+    }
+
+    pub fn increment_sent(&mut self) {
+        let mut stats = self.node_stats.write();
+        stats.recvd_count += 1
+    }
+}

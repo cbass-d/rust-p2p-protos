@@ -21,21 +21,23 @@ pub(crate) struct KadQueries {
 pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<()> {
     match event {
         kad::Event::InboundRequest { request } => {
-            node.logs.write().0.add_kademlia_event(
+            node.logger.add_kademlia_event(
                 KadEventInfo::InboundRequest {
                     request: request.clone(),
                 },
                 Instant::now().duration_since(node.start),
             );
+
             on_inbound_req(node, request);
         }
         kad::Event::OutboundQueryProgressed {
             result, id, step, ..
         } => {
-            node.logs.write().0.add_kademlia_event(
+            node.logger.add_kademlia_event(
                 KadEventInfo::OutboundQueryProgressed { id },
                 Instant::now().duration_since(node.start),
             );
+
             on_query_result(node, result, id, step);
         }
         kad::Event::RoutingUpdated {
@@ -45,19 +47,20 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
             old_peer,
             ..
         } => {
-            node.logs.write().0.add_kademlia_event(
+            node.logger.add_kademlia_event(
                 KadEventInfo::RoutingUpdated {
                     peer,
                     is_new: is_new_peer,
                     addresses: addresses.clone(),
-                    old_peer: old_peer,
+                    old_peer,
                 },
                 Instant::now().duration_since(node.start),
             );
+
             debug!(target: "simulation::node::kademlia_events", "route updated for {peer}: {:?}", addresses);
         }
         kad::Event::RoutablePeer { peer, address, .. } => {
-            node.logs.write().0.add_kademlia_event(
+            node.logger.add_kademlia_event(
                 KadEventInfo::RoutablePeer {
                     peer,
                     address: address.clone(),
@@ -68,17 +71,19 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
             debug!(target: "simulation::node::kademlia_events", "peer {peer} {:?} routable", address);
         }
         kad::Event::PendingRoutablePeer { peer, address, .. } => {
-            node.logs.write().0.add_kademlia_event(
+            node.logger.add_kademlia_event(
                 KadEventInfo::PendingRoutablePeer { peer },
                 Instant::now().duration_since(node.start),
             );
+
             debug!(target: "simulation::node::kademlia_events", "peer {peer} {:?} pending routable", address);
         }
         kad::Event::ModeChanged { new_mode } => {
-            node.logs.write().0.add_kademlia_event(
+            node.logger.add_kademlia_event(
                 KadEventInfo::ModeChanged { new_mode },
                 Instant::now().duration_since(node.start),
             );
+
             info!(target: "simulation::node::kademlia_events", "node mode changed to {new_mode}");
 
             node.base.kad_info.set_mode(new_mode);

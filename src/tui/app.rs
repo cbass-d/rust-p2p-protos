@@ -121,7 +121,7 @@ pub(crate) struct App {
     network_command_tx: mpsc::Sender<NetworkCommand>,
 
     /// Message histories and stats of the nodes
-    node_logs: HashMap<PeerId, Arc<RwLock<(MessageHistory, NodeStats)>>>,
+    node_logs: HashMap<PeerId, (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
 
     /// HashMap containg the connections between the nodes
     node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
@@ -288,7 +288,9 @@ impl App {
                 if let Some(node_logs) = self.node_logs.get(&peer_id) {
                     debug!(target: "app", "successfully got message history for node: {peer_id}");
 
-                    self.node_log.display_logs(node_logs.clone());
+                    let (messages, stats) = node_logs;
+                    self.node_log
+                        .display_logs((messages.clone(), stats.clone()));
                 }
             }
             Action::DisplayNodeCommands { peer_id } => {
@@ -435,10 +437,11 @@ impl App {
             NetworkEvent::NodeRunning {
                 peer_id,
                 message_history,
+                stats,
                 node_connections,
             } => {
                 debug!(target: "TUI", "network event received: node running");
-                self.node_logs.insert(peer_id, message_history);
+                self.node_logs.insert(peer_id, (message_history, stats));
 
                 {
                     let mut active_nodes = self.active_nodes.write();

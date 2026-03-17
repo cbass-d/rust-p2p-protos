@@ -25,6 +25,7 @@ use crate::{
         history::MessageHistory,
         info::{IdentifyInfo, KademliaInfo},
         kad_handler::KadQueries,
+        logger::NodeLogger,
         running::RunningNode,
     },
 };
@@ -125,6 +126,7 @@ impl ConfiguredNode {
                 MessageHistory::default(),
                 NodeStats::default(),
             ))),
+            logger: NodeLogger::default(),
             kad_queries: KadQueries::default(),
             bootstrapped: false,
             connection_tracker,

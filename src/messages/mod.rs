@@ -18,7 +18,8 @@ pub(crate) enum NetworkEvent {
     /// A new node has started running
     NodeRunning {
         peer_id: PeerId,
-        message_history: Arc<RwLock<(MessageHistory, NodeStats)>>,
+        message_history: Arc<RwLock<MessageHistory>>,
+        stats: Arc<RwLock<NodeStats>>,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
     },
 

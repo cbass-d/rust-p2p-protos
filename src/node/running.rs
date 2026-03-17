@@ -16,6 +16,7 @@ use crate::{
         history::{MessageHistory, SwarmEventInfo},
         identify_handler,
         kad_handler::{self, KadQueries},
+        logger::NodeLogger,
     },
 };
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -49,6 +50,9 @@ pub(crate) struct RunningNode {
     /// Logs for libp2p swarm events
     pub(crate) logs: Arc<RwLock<(MessageHistory, NodeStats)>>,
 
+    /// Handler for logging of events
+    pub(crate) logger: NodeLogger,
+
     /// Important kad queries that we must keep track of
     pub(crate) kad_queries: KadQueries,
 
@@ -70,7 +74,8 @@ impl RunningNode {
             .network_event_tx
             .send(NetworkEvent::NodeRunning {
                 peer_id: self.base.peer_id,
-                message_history: self.logs.clone(),
+                message_history: self.logger.history(),
+                stats: self.logger.stats(),
                 node_connections: self.connection_tracker.connections(),
             })
             .await
@@ -163,6 +168,7 @@ impl RunningNode {
         network_event_tx: mpsc::Sender<NetworkEvent>,
     ) {
         let start = self.start;
+        self.logger.increment_sent();
         match event {
             SwarmEvent::Dialing { peer_id, .. } => {
                 debug!(target: "simulation::node", "dialing peer {:?}", peer_id);
@@ -172,7 +178,7 @@ impl RunningNode {
                 address,
                 ..
             } => {
-                self.logs.write().0.add_swarm_event(
+                self.logger.add_swarm_event(
                     SwarmEventInfo::NewListenAddr {
                         listener_id,
                         address,
@@ -193,7 +199,7 @@ impl RunningNode {
 
                 self.connection_tracker.add_active_peer(peer_id);
 
-                self.logs.write().0.add_swarm_event(
+                self.logger.add_swarm_event(
                     SwarmEventInfo::ConnectionEstablished { peer_id },
                     Instant::now().duration_since(start),
                 );
@@ -227,7 +233,7 @@ impl RunningNode {
             } => {
                 debug!(target: "simulation::node", "connection closed peer {} ({:?}) cause: {:?}", peer_id, endpoint, cause);
 
-                self.logs.write().0.add_swarm_event(
+                self.logger.add_swarm_event(
                     SwarmEventInfo::ConnectionClosed { peer_id },
                     Instant::now().duration_since(start),
                 );
@@ -252,7 +258,7 @@ impl RunningNode {
             } => {
                 debug!(target: "simulation::node", "listener now closed");
 
-                self.logs.write().0.add_swarm_event(
+                self.logger.add_swarm_event(
                     SwarmEventInfo::ListenerClosed {
                         listener_id,
                         addresses,
@@ -336,33 +342,6 @@ impl RunningNode {
                 None
             }
         }
-    }
-    /// Returns the identify messages as strings
-    pub fn identify_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().0;
-
-        messages.identify_messages()
-    }
-
-    /// Returns the kademlia messages as strings
-    pub fn kad_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().0;
-
-        messages.kad_messages()
-    }
-
-    /// Returns the swarm messages as strings
-    pub fn swarm_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().0;
-
-        messages.swarm_messages()
-    }
-
-    /// Returns the all messages as strings
-    pub fn all_messages(&self) -> Vec<String> {
-        let messages = &self.logs.read().0;
-
-        messages.all_messages()
     }
 
     fn update_kademlia_info(&mut self) {
