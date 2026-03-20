@@ -16,7 +16,7 @@ pub(crate) struct State {
     /// Instant when the node started running
     start: Instant,
 
-    /// CancellationToken that shared network
+    /// `CancellationToken` that shared network
     cancellation_token: CancellationToken,
 }
 

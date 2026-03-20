@@ -12,9 +12,9 @@ use crate::node::{NODE_NETWORK_AGENT, history::KadEventInfo, running::RunningNod
 /// Keeping track of important kademlia queries
 #[derive(Default, Debug)]
 pub(crate) struct KadQueries {
-    pub bootsrap_id: Option<QueryId>,
-    pub providing_agent_id: Option<QueryId>,
-    pub get_providers_id: Option<QueryId>,
+    pub bootsrap: Option<QueryId>,
+    pub providing_agent: Option<QueryId>,
+    pub get_providers: Option<QueryId>,
 }
 
 /// Handle an incoming kademlia event
@@ -28,7 +28,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
                 Instant::now().duration_since(node.state.start()),
             );
 
-            on_inbound_req(node, request);
+            on_inbound_req(node, &request);
         }
         kad::Event::OutboundQueryProgressed {
             result, id, step, ..
@@ -38,7 +38,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
                 Instant::now().duration_since(node.state.start()),
             );
 
-            on_query_result(node, result, id, step);
+            on_query_result(node, result, id, &step);
         }
         kad::Event::RoutingUpdated {
             peer,
@@ -70,6 +70,14 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
 
             debug!(target: "simulation::node::kademlia_events", "peer {peer} {:?} routable", address);
         }
+        kad::Event::UnroutablePeer { peer } => {
+            node.logger.add_kademlia_event(
+                KadEventInfo::UnroutablePeer { peer },
+                Instant::now().duration_since(node.state.start()),
+            );
+
+            debug!(target: "simulation::node::kademlia_events", "{peer} is unroutable");
+        }
         kad::Event::PendingRoutablePeer { peer, address, .. } => {
             node.logger.add_kademlia_event(
                 KadEventInfo::PendingRoutablePeer { peer },
@@ -88,15 +96,12 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
 
             node.base.kad_info.set_mode(new_mode);
         }
-        other => {
-            debug!("some other kad event: {:?}", other);
-        }
     }
     Ok(())
 }
 
 /// Handle an inbound kademlia request
-fn on_inbound_req(_node: &mut RunningNode, request: InboundRequest) {
+fn on_inbound_req(_node: &mut RunningNode, request: &InboundRequest) {
     match request {
         InboundRequest::FindNode { .. } => {}
         InboundRequest::GetProvider { .. } => {}
@@ -107,14 +112,14 @@ fn on_inbound_req(_node: &mut RunningNode, request: InboundRequest) {
 }
 
 /// Handle result of kademlia query
-fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, step: ProgressStep) {
+fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, step: &ProgressStep) {
     match result {
         QueryResult::Bootstrap(Ok(res)) => {
-            if let Some(qid) = node.kad_queries.bootsrap_id
+            if let Some(qid) = node.kad_queries.bootsrap
                 && id == qid
             {
                 if step.last {
-                    node.kad_queries.bootsrap_id = None;
+                    node.kad_queries.bootsrap = None;
                     node.state.bootstrap();
                     node.base.kad_info.set_bootstrapped(true);
 
@@ -135,19 +140,19 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
                     let key = RecordKey::new(&NODE_NETWORK_AGENT);
                     let qid = node.base.kad_get_providers(key);
 
-                    node.kad_queries.get_providers_id = Some(qid);
+                    node.kad_queries.get_providers = Some(qid);
                 } else {
                     debug!(
                         target: "simulation::node::kademlia_events",
                         "kademlia bootstrapping peer {}, remaining {}",
                         res.peer, res.num_remaining
-                    )
+                    );
                 }
             }
         }
         QueryResult::Bootstrap(Err(e)) => {
             warn!(target: "simulation::node::kademlia_events", "failed to bootstrap error: {e}");
-            node.kad_queries.bootsrap_id = None;
+            node.kad_queries.bootsrap = None;
         }
         QueryResult::GetClosestPeers(Ok(closest_res)) => {
             let key = PeerId::from_bytes(&closest_res.key);
@@ -160,7 +165,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
             warn!(target: "simulation::node::kademlia_events", "get closest peers error: {e}");
         }
         QueryResult::GetProviders(Ok(providers)) => {
-            if let Some(qid) = node.kad_queries.get_providers_id
+            if let Some(qid) = node.kad_queries.get_providers
                 && id == qid
             {
                 match providers {
@@ -173,7 +178,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
                             // Get other possible/peers providers
                             node.base.kad_get_closest_peers(*provider);
                         }
-                        node.kad_queries.get_providers_id = None;
+                        node.kad_queries.get_providers = None;
                     }
                     kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
                         debug!(target: "simulation::node::kademlia_events", "get providers closest_peers: {:?}", closest_peers);
@@ -188,30 +193,30 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
             }
         }
         QueryResult::GetProviders(Err(e)) => {
-            if let Some(qid) = node.kad_queries.get_providers_id
+            if let Some(qid) = node.kad_queries.get_providers
                 && id == qid
             {
-                node.kad_queries.get_providers_id = None;
+                node.kad_queries.get_providers = None;
                 error!(target: "simulation::node::kademlia_events", "failed to get providers for wg mesh agent string: {e}");
             }
         }
         QueryResult::StartProviding(Ok(_)) => {
-            if let Some(qid) = node.kad_queries.providing_agent_id
+            if let Some(qid) = node.kad_queries.providing_agent
                 && id == qid
                 && step.last
             {
-                node.kad_queries.providing_agent_id = None;
+                node.kad_queries.providing_agent = None;
                 debug!(target: "simulation::node::kademlia_events", "node providing wg mesh agent string");
             }
         }
         QueryResult::StartProviding(Err(e)) => {
             warn!(target: "simulation::node::kademlia_events", "start providing error: {e}");
 
-            if let Some(qid) = node.kad_queries.providing_agent_id
+            if let Some(qid) = node.kad_queries.providing_agent
                 && id == qid
             {
                 error!(target: "simulation::node::kademlia_events", "failed to provide wg agent string");
-                node.kad_queries.providing_agent_id = None;
+                node.kad_queries.providing_agent = None;
             }
         }
         QueryResult::RepublishRecord(_) => {
@@ -221,7 +226,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
             GetRecordOk::FoundRecord(record) => {
                 debug!(target: "simulation::node::kademlia_events", "found record {:?} at {:?}", record.record, record.peer);
             }
-            _ => {
+            GetRecordOk::FinishedWithNoAdditionalRecord { .. } => {
                 debug!(target: "simulation::node::kademlia_events", "get record finished with no additional records");
             }
         },

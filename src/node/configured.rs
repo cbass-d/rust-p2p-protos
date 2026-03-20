@@ -11,11 +11,11 @@ use libp2p::{
     swarm::{self},
     yamux,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    messages::{CommandChannel, NetworkEvent, NodeCommand, NodeResponse},
+    messages::{CommandChannel, NetworkEvent},
     node::{
         IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError,
         base::NodeBase,
@@ -37,7 +37,7 @@ pub(crate) struct ConfiguredNode {
     /// The peers the node knows at build time
     known_peers: Vec<Multiaddr>,
 
-    /// CancellationToken that shared network
+    /// `CancellationToken` that shared network
     cancellation_token: CancellationToken,
 
     /// mpsc sender for Network Events
@@ -51,13 +51,7 @@ impl ConfiguredNode {
     pub fn new(
         cancellation_token: CancellationToken,
         network_event_tx: mpsc::Sender<NetworkEvent>,
-    ) -> Result<
-        (
-            Self,
-            mpsc::Sender<(NodeCommand, oneshot::Sender<NodeResponse>)>,
-        ),
-        NodeError,
-    > {
+    ) -> Result<(Self, mpsc::Sender<CommandChannel>), NodeError> {
         // Build the mpsc channel where the node will be receiving commands from
         let (tx, rx) = mpsc::channel(100);
 
@@ -112,7 +106,7 @@ impl ConfiguredNode {
         Ok((node, tx))
     }
 
-    /// Transitions from ConfiguredNode to a RunningNode instance consuming itself
+    /// Transitions from `ConfiguredNode` to a `RunningNode` instance consuming itself
     pub fn start(self) -> RunningNode {
         let mut connection_tracker = ConnectionTracker::default();
         connection_tracker.set_known(self.known_peers);

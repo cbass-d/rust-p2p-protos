@@ -277,7 +277,7 @@ impl NodeBox {
         self.lines.retain(|p, _| p.0 != peer_id && p.1 != peer_id);
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: &Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::AddNode {
                 peer_id,
@@ -286,9 +286,10 @@ impl NodeBox {
                 debug!(target: "app::node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
 
                 self.len += 1;
-                let node = self.generate_node_on_canvas(&peer_id);
-                self.node_shapes.insert(peer_id, node);
-                self.node_connections.insert(peer_id, node_connections);
+                let node = self.generate_node_on_canvas(peer_id);
+                self.node_shapes.insert(*peer_id, node);
+                self.node_connections
+                    .insert(*peer_id, node_connections.clone());
 
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {
@@ -304,15 +305,15 @@ impl NodeBox {
             Action::RemoveNode { peer_id } => {
                 self.len -= 1;
 
-                self.node_coords.remove(&peer_id);
-                self.node_shapes.remove(&peer_id);
-                self.remove_line(peer_id);
+                self.node_coords.remove(peer_id);
+                self.node_shapes.remove(peer_id);
+                self.remove_line(*peer_id);
             }
             Action::UpdateConnections { peer_one, peer_two } => {
-                self.update_connections(peer_one, peer_two);
+                self.update_connections(*peer_one, *peer_two);
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
-                self.remove_connection(peer_one, peer_two);
+                self.remove_connection(*peer_one, *peer_two);
             }
             _ => {}
         }

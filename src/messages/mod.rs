@@ -83,7 +83,7 @@ pub(crate) enum NodeCommand {
     Stop,
 }
 
-/// The response a node sends back after receiving a NodeCommand
+/// The response a node sends back after receiving a `NodeCommand`
 #[derive(Debug, PartialEq)]
 pub(crate) enum NodeResponse {
     /// Local identify info

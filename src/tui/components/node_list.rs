@@ -143,9 +143,9 @@ impl NodeList {
         if idx >= self.len { self.len - 1 } else { idx }
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: &Action, actions: &mut VecDeque<Action>) {
         match action {
-            Action::AddNode { peer_id, .. } => {
+            Action::AddNode { .. } => {
                 self.len += 1;
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {
@@ -161,7 +161,7 @@ impl NodeList {
                     debug!(target: "app::node_list", "display log action added");
                 }
             }
-            Action::RemoveNode { peer_id } => {
+            Action::RemoveNode { .. } => {
                 self.len -= 1;
             }
             _ => {}

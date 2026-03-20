@@ -23,7 +23,7 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
             if info.agent_version == NODE_NETWORK_AGENT
                 && !node.connection_tracker.has_connection(&peer_id)
             {
-                for addr in info.listen_addrs.into_iter() {
+                for addr in info.listen_addrs {
                     if node.base.dial(addr.clone()).is_ok() {
                         info!(target: "simulation::node::swarm_events", "dialed peer {addr} from identify recv");
 

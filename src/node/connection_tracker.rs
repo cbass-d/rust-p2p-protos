@@ -23,12 +23,8 @@ impl ConnectionTracker {
     }
 
     pub(crate) fn connection_count(&self) -> usize {
-        let count = {
-            let current_peers = self.current_peers.read();
-            current_peers.len()
-        };
-
-        count
+        let current_peers = self.current_peers.read();
+        current_peers.len()
     }
 
     pub(crate) fn known_peers_count(&self) -> usize {

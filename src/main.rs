@@ -1,3 +1,6 @@
+#![warn(clippy::pedantic)]
+#![deny(clippy::unwrap_used)]
+
 mod cli;
 mod error;
 mod messages;

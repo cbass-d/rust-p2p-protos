@@ -78,10 +78,10 @@ pub(crate) enum Action {
     /// Display the node kademlia info popup for the selected node
     DisplayKademliaInfo { peer_id: PeerId },
 
-    /// Connect peer_one to peer_two, peer_one being the initiator
+    /// Connect `peer_one` to `peer_two`, `peer_one` being the initiator
     ConnectTo { peer_one: PeerId, peer_two: PeerId },
 
-    /// Disconnect peer_one from peer_two, peer_one being the initiator
+    /// Disconnect `peer_one` from `peer_two`, `peer_one` being the initiator
     DisconnectFrom { peer_one: PeerId, peer_two: PeerId },
 
     /// Display the manage connections popup for the selected node
@@ -95,9 +95,6 @@ pub(crate) enum Action {
         content: PopUpContent,
         peer_id: PeerId,
     },
-
-    /// Get Identify info for node
-    GetIdentifyInfo { peer_id: PeerId },
 }
 
 #[derive(Debug)]
@@ -105,7 +102,7 @@ pub(crate) struct App {
     /// Flag for stopping the TUI application
     quit: bool,
 
-    /// CancellationToken used to signal other running tasks
+    /// `CancellationToken` used to signal other running tasks
     /// to exit
     cancellation_token: CancellationToken,
 
@@ -123,7 +120,7 @@ pub(crate) struct App {
     /// Message histories and stats of the nodes
     node_logs: HashMap<PeerId, (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
 
-    /// HashMap containg the connections between the nodes
+    /// `HashMap` containg the connections between the nodes
     node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
     /// Component for displaying the nodes on Canvas
@@ -152,8 +149,8 @@ pub(crate) struct App {
 }
 
 impl App {
-    /// Builds a new App structure, returns the App, a CancellationToken, mpsc sender for
-    /// NetworkEvent, and a mpsc receiver for NetworkCommand
+    /// Builds a new `App` structure, returns the App, a `CancellationToken`, mpsc sender for
+    /// `NetworkEvent`, and a mpsc receiver for `NetworkCommand`
     pub fn new(
         cancellation_token: CancellationToken,
         network_event_rx: mpsc::Receiver<NetworkEvent>,
@@ -164,7 +161,7 @@ impl App {
         let active_nodes = Arc::new(RwLock::new(IndexSet::new()));
         Self {
             quit: false,
-            cancellation_token: cancellation_token,
+            cancellation_token,
             network_event_rx,
             network_command_tx,
             node_box: NodeBox::new(active_nodes.clone()),
@@ -272,7 +269,7 @@ impl App {
                 self.focus_list_graph();
                 self.unfocus_logs();
             }
-            _ => {}
+            Focus::PopUp => {}
         }
     }
 
@@ -385,10 +382,10 @@ impl App {
 
         // Pass the action through the different components adding the
         // returned action if needed
-        self.node_box.update(action.clone(), actions);
-        self.node_list.update(action.clone(), actions);
-        self.node_log.update(action.clone(), actions);
-        self.popup.update(action.clone(), actions);
+        self.node_box.update(&action, actions);
+        self.node_list.update(&action, actions);
+        self.node_log.update(&action, actions);
+        self.popup.update(&action, actions);
     }
 
     fn enable_popup(&mut self) {
@@ -406,11 +403,7 @@ impl App {
     }
 
     /// Process a TUI event and output an Action
-    async fn handle_tui_event(
-        &mut self,
-        event: TuiEvent,
-        actions: &mut VecDeque<Action>,
-    ) -> Option<Action> {
+    async fn handle_tui_event(&mut self, event: TuiEvent, actions: &mut VecDeque<Action>) {
         match event {
             TuiEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 if let Err(e) = self.handle_key_event(key_event, actions).await {
@@ -418,12 +411,6 @@ impl App {
                 }
             }
             _ => {}
-        };
-
-        match self.focus {
-            Focus::NodeList => None,
-            Focus::NodeLog => None,
-            _ => None,
         }
     }
 
@@ -496,7 +483,7 @@ impl App {
         match self.focus {
             Focus::NodeList => {
                 let _ = self.node_box.handle_key_event(key_event, actions);
-                self.node_list.handle_key_event(key_event, actions)?
+                self.node_list.handle_key_event(key_event, actions)?;
             }
             Focus::NodeLog => self.node_log.handle_key_event(key_event, actions)?,
             Focus::PopUp => self.popup.handle_key_event(key_event, actions).await?,

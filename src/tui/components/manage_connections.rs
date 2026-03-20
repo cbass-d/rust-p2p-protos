@@ -30,36 +30,24 @@ pub(crate) struct ManageConnections {
     /// and other components
     active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
 
-    /// Map of index to peer in the active_nodes vector to facilate accessing
-    idx_to_peer: HashMap<usize, PeerId>,
-
-    /// Inverse map of idx_to_peer
-    peer_to_idx: HashMap<PeerId, usize>,
-
     /// Hashmap representing the connections between the nodes
     node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
     /// The length of the current list of active nodes
     len: usize,
 
-    /// The index where the next peer will be added in the active_nodes vector
-    idx: usize,
-
     /// The state of the list (currently selected, next, etc.)
     pub list_state: ListState,
 }
 
 impl ManageConnections {
-    /// Build a fresh ManageConnections component
+    /// Build a fresh `ManageConnections` component
     pub fn new(active_nodes: Arc<RwLock<IndexSet<PeerId>>>) -> Self {
         Self {
             node: None,
             active_nodes,
-            peer_to_idx: HashMap::new(),
-            idx_to_peer: HashMap::new(),
             node_connections: HashMap::default(),
             len: 0,
-            idx: 0,
             list_state: ListState::default(),
         }
     }
@@ -176,7 +164,7 @@ impl ManageConnections {
             return;
         }
 
-        let list_items = self.format_peer_list(other_nodes);
+        let list_items = self.format_peer_list(&other_nodes);
 
         let list = List::new(list_items)
             .highlight_style(Style::new().reversed())
@@ -186,27 +174,31 @@ impl ManageConnections {
     }
 
     /// Format the peer list to reflect active connections to be displayed
-    fn format_peer_list(&self, peer_list: Vec<&PeerId>) -> Vec<String> {
-        self.node
-            .and_then(|node| self.node_connections.get(&node))
-            .map(|connections| {
-                let connections = connections.read();
-                peer_list
-                    .iter()
-                    .map(|p| {
-                        if **p == self.node.unwrap() {
-                            format!("(current node) -> {}", p)
-                        } else {
-                            if connections.contains(p) {
-                                format!("[*] {}", p)
+    fn format_peer_list(&self, peer_list: &[&PeerId]) -> Vec<String> {
+        if let Some(node) = self.node {
+            self.node_connections
+                .get(&node)
+                .map(|connections| {
+                    let connections = connections.read();
+                    peer_list
+                        .iter()
+                        .map(|p| {
+                            if **p == node {
+                                format!("(current node) -> {p}")
                             } else {
-                                format!("[ ] {}", p)
+                                if connections.contains(p) {
+                                    format!("[*] {p}")
+                                } else {
+                                    format!("[ ] {p}")
+                                }
                             }
-                        }
-                    })
-                    .collect::<Vec<String>>()
-            })
-            .unwrap_or_default()
+                        })
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default()
+        } else {
+            vec![]
+        }
     }
 
     fn remove_peer_from_connections(&mut self, peer_id: &PeerId) {

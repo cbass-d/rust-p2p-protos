@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashSet, VecDeque},
-    sync::Arc,
-};
+use std::{collections::VecDeque, sync::Arc};
 
 use color_eyre::eyre::Result;
 use crossterm::event::KeyEvent;
@@ -36,9 +33,6 @@ pub(crate) struct Popup {
     /// The content/component being diplayed
     pub content: Option<PopUpContent>,
 
-    /// If the component is currenlty in focus in the TUI
-    focus: bool,
-
     /// Component for NodeCommmands content
     pub node_commands: NodeCommands,
 
@@ -65,7 +59,6 @@ impl Popup {
             identify_info: IdentifyInfo::new(),
             kademlia_info: KademliaInfo::new(),
             manage_connections: ManageConnections::new(active_nodes),
-            focus: false,
         }
     }
 
@@ -80,10 +73,6 @@ impl Popup {
 
     pub fn set_content(&mut self, content: PopUpContent) {
         self.content = Some(content);
-    }
-
-    pub fn focus(&mut self, focus: bool) {
-        self.focus = focus;
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -107,7 +96,7 @@ impl Popup {
         }
     }
 
-    pub fn update(&mut self, action: Action, actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: &Action, actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayManageConnections { .. } => {
                 self.set_content(PopUpContent::ManageConnections);

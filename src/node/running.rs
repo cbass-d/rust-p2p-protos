@@ -152,6 +152,21 @@ impl RunningNode {
         match event {
             SwarmEvent::Dialing { peer_id, .. } => {
                 debug!(target: "simulation::node", "dialing peer {:?}", peer_id);
+
+                self.logger.add_swarm_event(
+                    SwarmEventInfo::Dialing { peer_id },
+                    Instant::now().duration_since(start),
+                );
+            }
+            SwarmEvent::IncomingConnection { send_back_addr, .. } => {
+                debug!(target: "simulation::node", "incoming connection from {:?}", send_back_addr);
+
+                self.logger.add_swarm_event(
+                    SwarmEventInfo::IncomingConnection {
+                        address: send_back_addr,
+                    },
+                    Instant::now().duration_since(start),
+                );
             }
             SwarmEvent::NewListenAddr {
                 listener_id,
@@ -199,7 +214,7 @@ impl RunningNode {
                     debug!(target: "simulation::node::kademlia_events", "attempting kademlia bootstrapping");
                     if let Ok(qid) = self.base.kad_bootstrap() {
                         debug!(target: "simulation::node::kademlia_events", "kademlia bootstrap started");
-                        self.kad_queries.bootsrap_id = Some(qid);
+                        self.kad_queries.bootsrap = Some(qid);
                     } else {
                         warn!(target: "simulation::node::kademlia_events", "initial kademlia bootstrap failed");
                     }
@@ -345,6 +360,8 @@ impl RunningNode {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use libp2p::kad::Mode;
     use tokio::sync::{mpsc, oneshot};
     use tokio_util::sync::CancellationToken;

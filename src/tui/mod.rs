@@ -32,9 +32,7 @@ use crate::error::AppError;
 /// as well as tick and render events
 pub(crate) enum TuiEvent {
     Init,
-    Quit,
     Error,
-    Closed,
     Tick,
     Render,
     Key(KeyEvent),
@@ -129,11 +127,9 @@ impl Tui {
                     maybe_event = crossterm_event => {
                         match maybe_event {
                             Some(Ok(CrosstermEvent::Key(key))) => {
-                                        if key.kind == KeyEventKind::Press {
-                                            if let Err(e) = _event_tx.send(TuiEvent::Key(key)) {
-                                                debug!(target: "tui", "error sending key event: {e}");
-                                                break;
-                                            }
+                                        if key.kind == KeyEventKind::Press && let Err(e) = _event_tx.send(TuiEvent::Key(key)) {
+                                            debug!(target: "tui", "error sending key event: {e}");
+                                            break;
                                         }
                                     }
                             Some(Err(_)) => {
@@ -190,18 +186,6 @@ impl Tui {
         crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)
             .map_err(|e| AppError::TuiInit(e.to_string()))?;
         self.start();
-        Ok(())
-    }
-
-    pub fn resume(&mut self) -> Result<(), AppError> {
-        self.enter()?;
-        Ok(())
-    }
-
-    pub fn suspend(&mut self) -> Result<()> {
-        self.exit()?;
-        #[cfg(not(windows))]
-        signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP)?;
         Ok(())
     }
 

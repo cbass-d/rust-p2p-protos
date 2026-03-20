@@ -37,10 +37,10 @@ impl Display for NodeNetworkEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NodeNetworkEvent::Identify(event) => {
-                write!(f, "{:?}", event)
+                write!(f, "{event:?}")
             }
             NodeNetworkEvent::Kademlia(event) => {
-                write!(f, "{:?}", event)
+                write!(f, "{event:?}")
             }
         }
     }

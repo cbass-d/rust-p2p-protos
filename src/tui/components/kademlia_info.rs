@@ -27,7 +27,7 @@ pub(crate) struct KademliaInfo {
 }
 
 impl KademliaInfo {
-    /// Build a fresh IdentifyInfo component
+    /// Build a fresh `KademliaInfo' component
     pub fn new() -> Self {
         Self {
             node: None,
@@ -66,7 +66,7 @@ impl KademliaInfo {
         Ok(())
     }
 
-    /// Render the IdentifyInfo component with the current context
+    /// Render the `KademliaInfo` component with the current context
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         Clear.render(area, frame.buffer_mut());
 
@@ -102,7 +102,7 @@ impl KademliaInfo {
                 lines.push_line(Line::from("None"));
             } else {
                 info.closest_peers.iter().for_each(|p| {
-                    lines.push_line(Line::from(format!("- {}", p)));
+                    lines.push_line(Line::from(format!("- {p}")));
                 });
             }
             lines.push_line(Line::raw("Buckets:").style(Style::new().underlined()));
@@ -127,16 +127,6 @@ impl KademliaInfo {
                 .block(block)
                 .alignment(Alignment::Center)
                 .render(area, frame.buffer_mut());
-        }
-    }
-
-    /// Update IdentifyInfo with the provided Action component as needed
-    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
-        match action {
-            Action::DisplayNodeCommands { peer_id } => {
-                self.node = Some(peer_id);
-            }
-            _ => {}
         }
     }
 }

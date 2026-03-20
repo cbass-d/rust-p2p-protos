@@ -30,7 +30,7 @@ pub(crate) struct NodeNetwork {
     /// mpsc sender for Network Events
     network_event_tx: mpsc::Sender<NetworkEvent>,
 
-    /// CancellationToken that shared by all nodes as well
+    /// `CancellationToken` that shared by all nodes as well
     cancellation_token: CancellationToken,
 
     /// The Instant that the network started, used to stamp swarm events
@@ -75,10 +75,10 @@ impl NodeNetwork {
     pub fn add_node(&mut self) -> Result<ConfiguredNode> {
         // Every node will be able to send network events and will have
         // a cancellation token to know when to stop
-        let _network_event_tx = self.network_event_tx.clone();
-        let _cancellation_token = self.cancellation_token.clone();
+        let network_event_tx = self.network_event_tx.clone();
+        let cancellation_token = self.cancellation_token.clone();
 
-        let (node, tx) = ConfiguredNode::new(_cancellation_token, _network_event_tx)?;
+        let (node, tx) = ConfiguredNode::new(cancellation_token, network_event_tx)?;
         let listen_address = node.base.listen_address.clone();
         let peer_id = node.base.peer_id;
 
@@ -97,41 +97,18 @@ impl NodeNetwork {
 
         let mut node_task_set: JoinSet<Result<NodeResult, NodeError>> = JoinSet::new();
 
-        // Create and run the requested number of nodes
-        for _ in 0..self.starting_nodes {
-            // Build the new node
-            let node = match self.add_node() {
-                Ok(node) => node,
-                Err(e) => {
-                    warn!(target: "simulation::network", "failed to build node: {e}");
-                    continue;
-                }
-            };
-
-            // Every node will be able to send network events and will have
-            // a cancellation token to know when to stop
-            let _network_event_tx = self.network_event_tx.clone();
-            let _cancellation_token = self.cancellation_token.clone();
-
-            // Run the newly built node
-            node_task_set.spawn(async move {
-                let mut running_node = node.start();
-                running_node.run().await
-            });
-
-            debug!(target: "simulation::network", "new node task spawned");
-        }
+        self.startup_starting_nodes(&mut node_task_set);
 
         loop {
             tokio::select! {
-                _ =  self.cancellation_token.cancelled() => {
+                () =  self.cancellation_token.cancelled() => {
                     debug!(target: "simulation::network", "cancellation token signal received");
                     break;
                 }
                 Some(command) = self.network_command_rx.recv() => {
                     debug!(target: "simulation::network", "network command received {:?}", command);
 
-                    node_task_set = self.handle_network_command(command, node_task_set).await;
+                    self.handle_network_command(command, &mut node_task_set).await;
                 },
             }
         }
@@ -155,19 +132,48 @@ impl NodeNetwork {
         Ok(())
     }
 
+    fn startup_starting_nodes(
+        &mut self,
+        node_task_set: &mut JoinSet<Result<NodeResult, NodeError>>,
+    ) {
+        for _ in 0..self.starting_nodes {
+            // Build the new node
+            let node = match self.add_node() {
+                Ok(node) => node,
+                Err(e) => {
+                    warn!(target: "simulation::network", "failed to build node: {e}");
+                    continue;
+                }
+            };
+
+            // Every node will be able to send network events and will have
+            // a cancellation token to know when to stop
+            let _network_event_tx = self.network_event_tx.clone();
+            let _cancellation_token = self.cancellation_token.clone();
+
+            // Run the newly built node
+            node_task_set.spawn(async move {
+                let mut running_node = node.start();
+                running_node.run().await
+            });
+
+            debug!(target: "simulation::network", "new node task spawned");
+        }
+    }
+
     /// Handle a network command received from the TUI. Takes in the network command and
     /// the task set of the running nodes. We return the task set with updates, if any
     async fn handle_network_command(
         &mut self,
         command: NetworkCommand,
-        mut node_task_set: JoinSet<Result<NodeResult, NodeError>>,
-    ) -> JoinSet<Result<NodeResult, NodeError>> {
+        node_task_set: &mut JoinSet<Result<NodeResult, NodeError>>,
+    ) {
         match command {
             NetworkCommand::ConnectNodes { peer_one, peer_two } => {
                 if let Some(node_channel) = self.nodes.get(&peer_one)
                     && let Some(address) = self.addresses.get(&peer_two)
                 {
-                    let (tx, _reply_rx) = oneshot::channel();
+                    let (tx, reply_rx) = oneshot::channel();
                     if let Err(e) = node_channel
                         .send((
                             NodeCommand::ConnectTo {
@@ -178,6 +184,18 @@ impl NodeNetwork {
                         .await
                     {
                         warn!(target: "simulation::network", "failed to send connect command: {e}");
+                    }
+
+                    let response = reply_rx.await;
+
+                    match response {
+                        Ok(NodeResponse::Dialed { addr }) => {
+                            debug!(target: "simulation::network", "node dialed peer address: {addr}");
+                        }
+                        Ok(NodeResponse::Failed) => {
+                            warn!(target: "simulation::network", "node failed to dial peer {peer_two}");
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -193,19 +211,25 @@ impl NodeNetwork {
 
                     let response = reply_rx.await;
 
-                    debug!(target: "simulation::network", "nodes disconnected");
+                    match response {
+                        Ok(NodeResponse::Disconnected { peer }) => {
+                            debug!(target: "simulation::network", "nodes disconnected {peer_one} =/= {peer_two}");
 
-                    if let Ok(NodeResponse::Disconnected { peer }) = response {
-                        if let Err(e) = self
-                            .network_event_tx
-                            .send(NetworkEvent::NodesDisconnected {
-                                peer_one,
-                                peer_two: peer,
-                            })
-                            .await
-                        {
-                            warn!(target: "simulation::network", "failed to send disconnect network event: {e}");
+                            if let Err(e) = self
+                                .network_event_tx
+                                .send(NetworkEvent::NodesDisconnected {
+                                    peer_one,
+                                    peer_two: peer,
+                                })
+                                .await
+                            {
+                                warn!(target: "simulation::network", "failed to send disconnect network event: {e}");
+                            }
                         }
+                        Ok(NodeResponse::Failed) => {
+                            warn!(target: "simulation::network", "nodes failed to disconnect {peer_one} -> {peer_two}");
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -219,16 +243,22 @@ impl NodeNetwork {
 
                     let response = reply_rx.await;
 
-                    debug!(target: "simulation::network", "received identify info: {:?}", response);
+                    match response {
+                        Ok(NodeResponse::IdentifyInfo { info }) => {
+                            debug!(target: "simulation::network", "received identify info: {:?}", info);
 
-                    if let Ok(NodeResponse::IdentifyInfo { info }) = response {
-                        if let Err(e) = self
-                            .network_event_tx
-                            .send(NetworkEvent::IdentifyInfo { info })
-                            .await
-                        {
-                            warn!(target: "simulation::network", "failed to send identify info network event: {e}");
+                            if let Err(e) = self
+                                .network_event_tx
+                                .send(NetworkEvent::IdentifyInfo { info })
+                                .await
+                            {
+                                warn!(target: "simulation::network", "failed to send identify info network event: {e}");
+                            }
                         }
+                        Ok(NodeResponse::Failed) => {
+                            warn!(target: "simulation::network", "nodes failed send identify info {peer_id}");
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -242,24 +272,43 @@ impl NodeNetwork {
 
                     let response = reply_rx.await;
 
-                    debug!(target: "simulation::network", "received kademlia info: {:?}", response);
+                    match response {
+                        Ok(NodeResponse::KademliaInfo { info }) => {
+                            debug!(target: "simulation::network", "received kademlia info: {:?}", info );
 
-                    if let Ok(NodeResponse::KademliaInfo { info }) = response {
-                        if let Err(e) = self
-                            .network_event_tx
-                            .send(NetworkEvent::KademliaInfo { info })
-                            .await
-                        {
-                            warn!(target: "simulation::network", "failed to send kad info network event: {e}");
+                            if let Err(e) = self
+                                .network_event_tx
+                                .send(NetworkEvent::KademliaInfo { info })
+                                .await
+                            {
+                                warn!(target: "simulation::network", "failed to send kad info network event: {e}");
+                            }
                         }
+                        Ok(NodeResponse::Failed) => {
+                            warn!(target: "simulation::network", "nodes failed send kad info {peer_id}");
+                        }
+                        _ => {}
                     }
                 }
             }
             NetworkCommand::StopNode { peer_id } => {
                 if let Some(node_channel) = self.nodes.get(&peer_id) {
-                    let (tx, _reply_rx) = oneshot::channel();
+                    let (tx, reply_rx) = oneshot::channel();
+
                     if let Err(e) = node_channel.send((NodeCommand::Stop, tx)).await {
                         warn!(target: "simulation::network", "failed to send stop command: {e}");
+                    }
+
+                    let response = reply_rx.await;
+
+                    match response {
+                        Ok(NodeResponse::Stopped) => {
+                            debug!(target: "simulation::network", "node stopped: {peer_id}");
+                        }
+                        Ok(NodeResponse::Failed) => {
+                            warn!(target: "simulation::network", "nodes failed to stop: {peer_id}");
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -269,7 +318,8 @@ impl NodeNetwork {
                     if let Err(e) = self.network_event_tx.send(NetworkEvent::MaxNodes).await {
                         warn!(target: "simulation::network", "failed to send max nodes network event: {e}");
                     }
-                    return node_task_set;
+
+                    return;
                 }
 
                 // Build the new node
@@ -294,13 +344,14 @@ impl NodeNetwork {
                 debug!(target: "simulation::network", "new node task spawned");
             }
         }
-
-        node_task_set
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    #![allow(clippy::unwrap_used)]
+
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
@@ -367,9 +418,10 @@ mod tests {
             .await
             .unwrap();
 
-        while let Some(event) = network_event_rx.recv().await {
+        if let Some(event) = network_event_rx.recv().await {
             assert!(matches!(event, NetworkEvent::MaxNodes));
-            break;
+        } else {
+            panic!()
         }
     }
 
@@ -526,8 +578,8 @@ mod tests {
             if let Some(NetworkEvent::NodesDisconnected { peer_one, peer_two }) =
                 network_event_rx.recv().await
             {
-                assert!(peer_ids[0] == peer_one);
-                assert!(peer_ids[1] == peer_two);
+                assert!(peer_ids[1] == peer_one);
+                assert!(peer_ids[0] == peer_two);
                 break;
             }
         }

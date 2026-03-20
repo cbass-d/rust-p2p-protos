@@ -15,7 +15,7 @@ use crate::node::{
 
 /// The base structure for a node
 pub(crate) struct NodeBase {
-    /// PeerId of the node in the libp2p swarm network
+    /// `PeerId` of the node in the libp2p swarm network
     pub(crate) peer_id: PeerId,
 
     /// The custom libp2p swarm behaviour
@@ -72,12 +72,12 @@ impl NodeBase {
         self.swarm.next().await
     }
 
-    pub(crate) fn kad_remove_peer(&mut self, peer_id: &PeerId) -> Option<()> {
-        if let Some(_) = self.swarm.behaviour_mut().kad.remove_peer(peer_id) {
-            return Some(());
-        } else {
-            None
-        }
+    pub(crate) fn kad_remove_peer(&mut self, peer_id: &PeerId) -> bool {
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .remove_peer(peer_id)
+            .is_some()
     }
 
     pub(crate) fn kad_bootstrap(&mut self) -> Result<QueryId, NodeError> {
@@ -85,7 +85,7 @@ impl NodeBase {
             .behaviour_mut()
             .kad
             .bootstrap()
-            .map_err(|e| NodeError::KadBootstrapFailed(e))
+            .map_err(NodeError::KadBootstrapFailed)
     }
 
     pub(crate) fn kad_get_providers(&mut self, key: RecordKey) -> QueryId {

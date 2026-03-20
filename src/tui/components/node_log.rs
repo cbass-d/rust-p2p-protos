@@ -42,7 +42,7 @@ impl NodeLog {
         self.focus = focus;
     }
 
-    pub fn update(&mut self, _action: Action, _actions: &mut VecDeque<Action>) {}
+    pub fn update(&mut self, _action: &Action, _actions: &mut VecDeque<Action>) {}
 
     pub fn handle_key_event(
         &mut self,
@@ -83,12 +83,6 @@ impl NodeLog {
         } else {
             new_pos
         }
-    }
-
-    /// Moving up and down the listcan move past the bounds of the list,
-    /// we must make sure it does not
-    fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len { self.len - 1 } else { idx }
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {

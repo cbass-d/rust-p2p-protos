@@ -29,7 +29,7 @@ impl NodeLogger {
 
     pub fn increment_sent(&mut self) {
         let mut stats = self.node_stats.write();
-        stats.recvd_count += 1
+        stats.recvd_count += 1;
     }
 
     pub fn add_swarm_event(&mut self, event: SwarmEventInfo, duration: Duration) {
