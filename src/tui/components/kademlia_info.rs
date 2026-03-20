@@ -27,7 +27,7 @@ pub(crate) struct KademliaInfo {
 }
 
 impl KademliaInfo {
-    /// Build a fresh `KademliaInfo' component
+    /// Build a fresh `KademliaInfo` component
     pub fn new() -> Self {
         Self {
             node: None,
@@ -51,13 +51,13 @@ impl KademliaInfo {
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
-        if let Some(peer_id) = self.node {
-            if key_event.code == KeyCode::Esc {
-                actions.push_back(Action::Popup {
-                    content: PopUpContent::NodeInfo,
-                    peer_id,
-                });
-            }
+        if let Some(peer_id) = self.node
+            && key_event.code == KeyCode::Esc
+        {
+            actions.push_back(Action::Popup {
+                content: PopUpContent::NodeInfo,
+                peer_id,
+            });
         }
 
         Ok(())

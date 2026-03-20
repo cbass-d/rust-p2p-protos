@@ -113,12 +113,12 @@ impl Popup {
             _ => {}
         }
 
-        self.node_commands.update(action.clone(), actions);
-        self.node_info.update(action.clone(), actions);
-        self.manage_connections.update(action.clone(), actions);
+        self.node_commands.update(action, actions);
+        self.node_info.update(action, actions);
+        self.manage_connections.update(action, actions);
     }
 
-    pub async fn handle_key_event(
+    pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,

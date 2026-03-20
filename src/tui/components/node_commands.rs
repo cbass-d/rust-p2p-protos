@@ -85,7 +85,7 @@ impl NodeCommands {
                     }
                 }
                 KeyCode::Esc => {
-                    actions.push_back(Action::CloseNodeCommands);
+                    actions.push_back(Action::ClosePopup);
                 }
                 _ => {}
             }
@@ -126,13 +126,5 @@ impl NodeCommands {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
-        match action {
-            Action::DisplayNodeCommands { peer_id } => {
-                self.node = Some(peer_id);
-            }
-            Action::CloseNodeCommands => {}
-            _ => {}
-        }
-    }
+    pub fn update(&mut self, _action: &Action, _actions: &mut VecDeque<Action>) {}
 }

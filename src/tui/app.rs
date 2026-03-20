@@ -42,6 +42,7 @@ pub(crate) enum Focus {
 /// The action to perform as the result of handling user input or from a network event
 #[derive(Debug, Clone)]
 pub(crate) enum Action {
+    #[allow(dead_code)]
     /// Quit the Application
     Quit,
 
@@ -66,9 +67,6 @@ pub(crate) enum Action {
     /// Display the logs for the selected node
     DisplayLogs { peer_id: PeerId },
 
-    /// Display the node commands popup for the selected node
-    DisplayNodeCommands { peer_id: PeerId },
-
     /// Display the node info popup for the selected node
     DisplayInfo { peer_id: PeerId },
 
@@ -87,14 +85,14 @@ pub(crate) enum Action {
     /// Display the manage connections popup for the selected node
     DisplayManageConnections { peer_id: PeerId },
 
-    /// Close the node commands popup
-    CloseNodeCommands,
-
     /// Display the Popup with the given content
     Popup {
         content: PopUpContent,
         peer_id: PeerId,
     },
+
+    /// Close the Popup
+    ClosePopup,
 }
 
 #[derive(Debug)]
@@ -119,9 +117,6 @@ pub(crate) struct App {
 
     /// Message histories and stats of the nodes
     node_logs: HashMap<PeerId, (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
-
-    /// `HashMap` containg the connections between the nodes
-    node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
 
     /// Component for displaying the nodes on Canvas
     node_box: NodeBox,
@@ -171,7 +166,6 @@ impl App {
             actions: VecDeque::new(),
             focus: Focus::NodeList,
             node_logs: HashMap::new(),
-            node_connections: HashMap::new(),
             active_nodes,
             tick_rate,
             frame_rate,
@@ -290,11 +284,6 @@ impl App {
                         .display_logs((messages.clone(), stats.clone()));
                 }
             }
-            Action::DisplayNodeCommands { peer_id } => {
-                debug!(target: "app", "displaying node commands for {peer_id}");
-
-                self.unfocus_list_graph();
-            }
             Action::DisplayManageConnections { peer_id } => {
                 debug!(target: "app", "displaying manage connections for {peer_id}");
 
@@ -329,9 +318,6 @@ impl App {
 
                 self.unfocus_list_graph();
             }
-            Action::CloseNodeCommands => {
-                self.focus_list_graph();
-            }
             Action::ConnectTo { peer_one, peer_two } => {
                 if let Err(e) = self
                     .network_command_tx
@@ -361,7 +347,7 @@ impl App {
             }
             Action::RemoveNode { .. } => {
                 self.focus_list_graph();
-                self.actions.push_back(Action::CloseNodeCommands);
+                self.actions.push_back(Action::ClosePopup);
             }
             Action::StartNode => {
                 if let Err(e) = self
@@ -372,10 +358,13 @@ impl App {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
             }
+            Action::ClosePopup => {
+                self.close_popup();
+            }
             Action::Popup { content, peer_id } => {
                 self.popup.set_content(content);
                 self.popup.set_node(peer_id);
-                self.enable_popup();
+                self.open_popup();
             }
             _ => {}
         }
@@ -388,7 +377,11 @@ impl App {
         self.popup.update(&action, actions);
     }
 
-    fn enable_popup(&mut self) {
+    fn close_popup(&mut self) {
+        self.focus_list_graph();
+    }
+
+    fn open_popup(&mut self) {
         self.focus = Focus::PopUp;
         self.unfocus_list_graph();
     }
@@ -447,7 +440,7 @@ impl App {
 
                 {
                     let mut active_nodes = self.active_nodes.write();
-                    active_nodes.remove(&peer_id);
+                    active_nodes.swap_remove(&peer_id);
                 }
 
                 actions.push_back(Action::RemoveNode { peer_id });
@@ -486,7 +479,7 @@ impl App {
                 self.node_list.handle_key_event(key_event, actions)?;
             }
             Focus::NodeLog => self.node_log.handle_key_event(key_event, actions)?,
-            Focus::PopUp => self.popup.handle_key_event(key_event, actions).await?,
+            Focus::PopUp => self.popup.handle_key_event(key_event, actions)?,
         }
 
         Ok(())

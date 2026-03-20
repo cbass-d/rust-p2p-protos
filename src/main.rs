@@ -25,7 +25,7 @@ const FRAME_RATE: f64 = 60.0;
 fn init_tracing() -> Result<WorkerGuard, AppError> {
     // Setup rolling logging to file
     let file_appender = tracing_appender::rolling::daily("logs", "p2p.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     let subscriber = tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
@@ -37,7 +37,7 @@ fn init_tracing() -> Result<WorkerGuard, AppError> {
 
     tracing::subscriber::set_global_default(subscriber)?;
 
-    Ok(_guard)
+    Ok(guard)
 }
 
 #[tokio::main]

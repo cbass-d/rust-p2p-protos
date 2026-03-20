@@ -211,19 +211,19 @@ impl ManageConnections {
         self.node_connections.remove(peer_id);
     }
 
-    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: &Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayManageConnections { peer_id } => {
-                self.node = Some(peer_id);
+                self.node = Some(*peer_id);
             }
-            Action::CloseNodeCommands => {}
             Action::AddNode {
                 peer_id,
                 node_connections,
             } => {
                 self.len += 1;
 
-                self.node_connections.insert(peer_id, node_connections);
+                self.node_connections
+                    .insert(*peer_id, node_connections.clone());
 
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {
@@ -234,7 +234,7 @@ impl ManageConnections {
                 debug!(target: "app::manage_connections", "Removing peer {0} from peer list", peer_id);
 
                 debug!(target: "app::manage_connections", "new peer list: {0:#?}", self.active_nodes);
-                self.remove_peer_from_connections(&peer_id);
+                self.remove_peer_from_connections(peer_id);
                 self.len -= 1;
             }
             _ => {}

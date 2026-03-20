@@ -127,12 +127,11 @@ impl NodeInfo {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn update(&mut self, action: Action, _actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: &Action, _actions: &mut VecDeque<Action>) {
         match action {
             Action::DisplayInfo { peer_id } => {
-                self.node = Some(peer_id);
+                self.node = Some(*peer_id);
             }
-            Action::CloseNodeCommands => {}
             _ => {}
         }
     }

@@ -51,14 +51,13 @@ impl IdentifyInfo {
         key_event: KeyEvent,
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
-        if let Some(peer_id) = self.node {
-            if key_event.code == KeyCode::Esc {
+        if let Some(peer_id) = self.node
+            && key_event.code == KeyCode::Esc {
                 actions.push_back(Action::Popup {
                     content: PopUpContent::NodeInfo,
                     peer_id,
                 });
             }
-        }
 
         Ok(())
     }
