@@ -53,23 +53,20 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
 
             debug!(target: "simulation::node::identify_events", "identify pushed event to {peer_id} {:?}", info);
         }
-        Event::Error { peer_id, error, .. } => match error {
-            libp2p::swarm::StreamUpgradeError::Timeout => {
-                node.logger.add_identify_event(
-                    IdentifyEventInfo::Error { peer_id },
-                    Instant::now().duration_since(node.state.start()),
-                );
+        Event::Error { peer_id, error, .. } => if let libp2p::swarm::StreamUpgradeError::Timeout = error {
+            node.logger.add_identify_event(
+                IdentifyEventInfo::Error { peer_id },
+                Instant::now().duration_since(node.state.start()),
+            );
 
-                node.base.kad_remove_peer(&peer_id);
-            }
-            _ => {
-                node.logger.add_identify_event(
-                    IdentifyEventInfo::Error { peer_id },
-                    Instant::now().duration_since(node.state.start()),
-                );
+            node.base.kad_remove_peer(&peer_id);
+        } else {
+            node.logger.add_identify_event(
+                IdentifyEventInfo::Error { peer_id },
+                Instant::now().duration_since(node.state.start()),
+            );
 
-                debug!(target: "simulation::node::identify_events", "identify error: {error}");
-            }
+            debug!(target: "simulation::node::identify_events", "identify error: {error}");
         },
     }
 

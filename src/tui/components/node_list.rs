@@ -78,7 +78,7 @@ impl NodeList {
             block = block.title_bottom("MAX NODES");
         }
 
-        let list = List::new(nodes.iter().map(|p| p.to_string()).collect::<Vec<String>>())
+        let list = List::new(nodes.iter().map(std::string::ToString::to_string).collect::<Vec<String>>())
             .highlight_style(Style::new().reversed())
             .highlight_symbol(">")
             .block(block);

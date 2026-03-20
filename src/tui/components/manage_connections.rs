@@ -185,12 +185,10 @@ impl ManageConnections {
                         .map(|p| {
                             if **p == node {
                                 format!("(current node) -> {p}")
+                            } else if connections.contains(p) {
+                                format!("[*] {p}")
                             } else {
-                                if connections.contains(p) {
-                                    format!("[*] {p}")
-                                } else {
-                                    format!("[ ] {p}")
-                                }
+                                format!("[ ] {p}")
                             }
                         })
                         .collect::<Vec<String>>()

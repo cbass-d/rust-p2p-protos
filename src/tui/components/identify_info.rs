@@ -52,14 +52,11 @@ impl IdentifyInfo {
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
         if let Some(peer_id) = self.node {
-            match key_event.code {
-                KeyCode::Esc => {
-                    actions.push_back(Action::Popup {
-                        content: PopUpContent::NodeInfo,
-                        peer_id,
-                    });
-                }
-                _ => {}
+            if key_event.code == KeyCode::Esc {
+                actions.push_back(Action::Popup {
+                    content: PopUpContent::NodeInfo,
+                    peer_id,
+                });
             }
         }
 
@@ -95,9 +92,9 @@ impl IdentifyInfo {
                 Line::raw("Peer Id:").style(Style::new().underlined()),
                 Line::from(info.public_key.to_peer_id().to_string()),
                 Line::raw("Protocol Version:").style(Style::new().underlined().bold()),
-                Line::from(info.protocol_version.to_string()),
+                Line::from(info.protocol_version.clone()),
                 Line::raw("Agent String:").style(Style::new().underlined()),
-                Line::from(info.agent_string.to_string()),
+                Line::from(info.agent_string.clone()),
                 Line::raw("Listen Address:").style(Style::new().underlined()),
                 Line::from(info.listen_addr.to_string()),
             ]);

@@ -102,7 +102,7 @@ impl NodeBase {
             .behaviour_mut()
             .kad
             .get_closest_local_peers(&key)
-            .map(|k| k.into_preimage())
+            .map(libp2p::libp2p_kad::KBucketKey::into_preimage)
             .collect()
     }
 

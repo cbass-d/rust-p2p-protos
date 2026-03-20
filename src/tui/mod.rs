@@ -39,7 +39,7 @@ pub(crate) enum TuiEvent {
 }
 
 /// The TUI structure that holds the state of the terminal environment as well
-/// as the handling of reading of events from the CrosstermBackend
+/// as the handling of reading of events from the `CrosstermBackend`
 pub(crate) struct Tui {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
     pub task: JoinHandle<()>,
@@ -119,7 +119,7 @@ impl Tui {
                 let crossterm_event = reader.next().fuse();
 
                 tokio::select! {
-                    _ = _cancellation_token.cancelled() => {
+                    () = _cancellation_token.cancelled() => {
                         debug!(target: "tui", "received signal of cancellation token");
                         break;
                     }

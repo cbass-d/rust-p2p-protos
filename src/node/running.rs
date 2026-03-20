@@ -75,7 +75,7 @@ impl RunningNode {
 
         while !self.state.stopped() {
             tokio::select! {
-                _ = self.state.cancelled() => {
+                () = self.state.cancelled() => {
                     debug!(target: "simulation::node", "cancellation token signal received");
                     break;
                 },
@@ -123,7 +123,7 @@ impl RunningNode {
         for addr in &self.connection_tracker.known() {
             if self.base.dial(addr.clone()).is_ok() {
                 debug!(target: "simulation::node", "successfully dialed peer {addr}");
-                dialed += 1
+                dialed += 1;
             } else {
                 warn!(target: "simulation::node", "failed to dial peer {addr}");
             }

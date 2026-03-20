@@ -33,19 +33,19 @@ pub(crate) struct Popup {
     /// The content/component being diplayed
     pub content: Option<PopUpContent>,
 
-    /// Component for NodeCommmands content
+    /// Component for `NodeCommmands` content
     pub node_commands: NodeCommands,
 
-    /// Component for NodeCommmands content
+    /// Component for `NodeCommmands` content
     pub node_info: NodeInfo,
 
-    /// Component for IdentifyInfo content
+    /// Component for `IdentifyInfo` content
     pub identify_info: IdentifyInfo,
 
-    /// Component for KademliaInfo content
+    /// Component for `KademliaInfo` content
     pub kademlia_info: KademliaInfo,
 
-    /// Component for NodeCommmands content
+    /// Component for `NodeCommmands` content
     pub manage_connections: ManageConnections,
 }
 
@@ -125,17 +125,17 @@ impl Popup {
     ) -> Result<()> {
         match self.content {
             Some(PopUpContent::NodeCommands) => {
-                self.node_commands.handle_key_event(key_event, actions)?
+                self.node_commands.handle_key_event(key_event, actions)?;
             }
             Some(PopUpContent::ManageConnections) => self
                 .manage_connections
                 .handle_key_event(key_event, actions)?,
             Some(PopUpContent::NodeInfo) => self.node_info.handle_key_event(key_event, actions)?,
             Some(PopUpContent::IdentifyInfo) => {
-                self.identify_info.handle_key_event(key_event, actions)?
+                self.identify_info.handle_key_event(key_event, actions)?;
             }
             Some(PopUpContent::KademliaInfo) => {
-                self.kademlia_info.handle_key_event(key_event, actions)?
+                self.kademlia_info.handle_key_event(key_event, actions)?;
             }
             _ => {}
         }

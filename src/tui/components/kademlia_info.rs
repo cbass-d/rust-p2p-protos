@@ -52,14 +52,11 @@ impl KademliaInfo {
         actions: &mut VecDeque<Action>,
     ) -> Result<()> {
         if let Some(peer_id) = self.node {
-            match key_event.code {
-                KeyCode::Esc => {
-                    actions.push_back(Action::Popup {
-                        content: PopUpContent::NodeInfo,
-                        peer_id,
-                    });
-                }
-                _ => {}
+            if key_event.code == KeyCode::Esc {
+                actions.push_back(Action::Popup {
+                    content: PopUpContent::NodeInfo,
+                    peer_id,
+                });
             }
         }
 
