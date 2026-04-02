@@ -87,7 +87,7 @@ impl RunningNode {
                     if let Some(event) = maybe_event {
                         trace!("node swarm event {:?}", event);
 
-                        self.handle_swarm_event(event, self.network_event_tx.clone()).await;
+                        self.handle_swarm_event(event).await;
                     } else {
                         error!(target: "simulation::node", "swarm stream ended");
                         return Err(NodeError::SwarmStreamEnded);
@@ -141,14 +141,10 @@ impl RunningNode {
         }
     }
 
-    async fn handle_swarm_event(
-        &mut self,
-        event: SwarmEvent<NodeNetworkEvent>,
-        network_event_tx: mpsc::Sender<NetworkEvent>,
-    ) {
+    async fn handle_swarm_event(&mut self, event: SwarmEvent<NodeNetworkEvent>) {
         let start = self.state.start();
 
-        self.logger.increment_sent();
+        self.logger.increment_recvd();
         match event {
             SwarmEvent::Dialing { peer_id, .. } => {
                 debug!(target: "simulation::node", "dialing peer {:?}", peer_id);
@@ -200,7 +196,8 @@ impl RunningNode {
                 );
 
                 // Send event of node connections
-                if let Err(e) = network_event_tx
+                if let Err(e) = self
+                    .network_event_tx
                     .send(NetworkEvent::NodesConnected {
                         peer_one: peer_id,
                         peer_two: self.base.peer_id,
@@ -214,7 +211,7 @@ impl RunningNode {
                     debug!(target: "simulation::node::kademlia_events", "attempting kademlia bootstrapping");
                     if let Ok(qid) = self.base.kad_bootstrap() {
                         debug!(target: "simulation::node::kademlia_events", "kademlia bootstrap started");
-                        self.kad_queries.bootsrap = Some(qid);
+                        self.kad_queries.bootstrap = Some(qid);
                     } else {
                         warn!(target: "simulation::node::kademlia_events", "initial kademlia bootstrap failed");
                     }
@@ -234,7 +231,8 @@ impl RunningNode {
                 );
 
                 // Send event of nodes disconnecting
-                if let Err(e) = network_event_tx
+                if let Err(e) = self
+                    .network_event_tx
                     .send(NetworkEvent::NodesDisconnected {
                         peer_one: peer_id,
                         peer_two: self.base.peer_id,

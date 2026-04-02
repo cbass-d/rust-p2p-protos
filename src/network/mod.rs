@@ -161,6 +161,11 @@ impl NodeNetwork {
         }
     }
 
+    fn remove_node(&mut self, peer: &PeerId) {
+        self.nodes.remove(peer);
+        self.addresses.remove(peer);
+    }
+
     /// Handle a network command received from the TUI. Takes in the network command and
     /// the task set of the running nodes. We return the task set with updates, if any
     async fn handle_network_command(
@@ -304,6 +309,7 @@ impl NodeNetwork {
                     match response {
                         Ok(NodeResponse::Stopped) => {
                             debug!(target: "simulation::network", "node stopped: {peer_id}");
+                            self.remove_node(&peer_id);
                         }
                         Ok(NodeResponse::Failed) => {
                             warn!(target: "simulation::network", "nodes failed to stop: {peer_id}");

@@ -12,7 +12,7 @@ use crate::node::{NODE_NETWORK_AGENT, history::KadEventInfo, running::RunningNod
 /// Keeping track of important kademlia queries
 #[derive(Default, Debug)]
 pub(crate) struct KadQueries {
-    pub bootsrap: Option<QueryId>,
+    pub bootstrap: Option<QueryId>,
     pub providing_agent: Option<QueryId>,
     pub get_providers: Option<QueryId>,
 }
@@ -102,6 +102,9 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: kad::Event) -> Result<
 
 /// Handle an inbound kademlia request
 fn on_inbound_req(_node: &mut RunningNode, request: &InboundRequest) {
+    debug!(target: "simulation::node::kademlia_events", "inbound request recieved: {request:?}");
+
+    // TODO
     match request {
         InboundRequest::FindNode { .. } => {}
         InboundRequest::GetProvider { .. } => {}
@@ -115,11 +118,11 @@ fn on_inbound_req(_node: &mut RunningNode, request: &InboundRequest) {
 fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, step: &ProgressStep) {
     match result {
         QueryResult::Bootstrap(Ok(res)) => {
-            if let Some(qid) = node.kad_queries.bootsrap
+            if let Some(qid) = node.kad_queries.bootstrap
                 && id == qid
             {
                 if step.last {
-                    node.kad_queries.bootsrap = None;
+                    node.kad_queries.bootstrap = None;
                     node.state.bootstrap();
                     node.base.kad_info.set_bootstrapped(true);
 
@@ -152,7 +155,7 @@ fn on_query_result(node: &mut RunningNode, result: QueryResult, id: QueryId, ste
         }
         QueryResult::Bootstrap(Err(e)) => {
             warn!(target: "simulation::node::kademlia_events", "failed to bootstrap error: {e}");
-            node.kad_queries.bootsrap = None;
+            node.kad_queries.bootstrap = None;
         }
         QueryResult::GetClosestPeers(Ok(closest_res)) => {
             let key = PeerId::from_bytes(&closest_res.key);

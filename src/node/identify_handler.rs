@@ -26,8 +26,8 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
                 for addr in info.listen_addrs {
                     if node.base.dial(addr.clone()).is_ok() {
                         info!(target: "simulation::node::swarm_events", "dialed peer {addr} from identify recv");
-
                         node.connection_tracker.add_active_peer(peer_id);
+                        break;
                     } else {
                         warn!(target: "simulation::node::swarm_events", "failed to dial peer {addr} from identify recv");
                     }
@@ -53,21 +53,23 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: identify::Event) -> Re
 
             debug!(target: "simulation::node::identify_events", "identify pushed event to {peer_id} {:?}", info);
         }
-        Event::Error { peer_id, error, .. } => if let libp2p::swarm::StreamUpgradeError::Timeout = error {
-            node.logger.add_identify_event(
-                IdentifyEventInfo::Error { peer_id },
-                Instant::now().duration_since(node.state.start()),
-            );
+        Event::Error { peer_id, error, .. } => {
+            if let libp2p::swarm::StreamUpgradeError::Timeout = error {
+                node.logger.add_identify_event(
+                    IdentifyEventInfo::Error { peer_id },
+                    Instant::now().duration_since(node.state.start()),
+                );
 
-            node.base.kad_remove_peer(&peer_id);
-        } else {
-            node.logger.add_identify_event(
-                IdentifyEventInfo::Error { peer_id },
-                Instant::now().duration_since(node.state.start()),
-            );
+                node.base.kad_remove_peer(&peer_id);
+            } else {
+                node.logger.add_identify_event(
+                    IdentifyEventInfo::Error { peer_id },
+                    Instant::now().duration_since(node.state.start()),
+                );
 
-            debug!(target: "simulation::node::identify_events", "identify error: {error}");
-        },
+                debug!(target: "simulation::node::identify_events", "identify error: {error}");
+            }
+        }
     }
 
     Ok(())

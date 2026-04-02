@@ -27,7 +27,7 @@ impl NodeLogger {
         stats.recvd_count
     }
 
-    pub fn increment_sent(&mut self) {
+    pub fn increment_recvd(&mut self) {
         let mut stats = self.node_stats.write();
         stats.recvd_count += 1;
     }

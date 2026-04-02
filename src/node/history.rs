@@ -244,33 +244,6 @@ impl MessageHistory {
 
         messages
     }
-
-    /// Prints the identify messages to stdout
-    pub fn display_identify_messages(&self) {
-        for message in &self.identify {
-            let (event, time) = message;
-            debug!(target: "simulation::node::history", "{time:#?}s : {event}");
-            println!("{time:#?}s : {event}");
-        }
-    }
-
-    /// Prints the kademlia messages to stdout
-    pub fn display_kademlia_messages(&self) {
-        for message in &self.kademlia {
-            let (event, time) = message;
-            debug!(target: "simulation::node::history", "{time:#?}s : {event}");
-            println!("{time:#?}s : {event}");
-        }
-    }
-
-    /// Prints the swarm messages to stdout
-    pub fn display_swarm_messages(&self) {
-        for message in &self.swarm {
-            let (event, time) = message;
-            debug!(target: "simulation::node::history", "{time:#?}s : {event}");
-            println!("{time:#?}s : {event}");
-        }
-    }
 }
 
 impl fmt::Display for KadEventInfo {
