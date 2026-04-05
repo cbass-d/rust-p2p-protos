@@ -17,6 +17,7 @@ pub(crate) enum LogMessage {
     Swarm { event: SwarmEventInfo, at: f32 },
     Kad { event: KadEventInfo, at: f32 },
     Identify { event: IdentifyEventInfo, at: f32 },
+    Mdns { event: MdnsEventInfo, at: f32 },
 }
 
 /// Wrappers for libp2p Swarm events for easier handling and formatting
@@ -81,11 +82,18 @@ pub(crate) enum IdentifyEventInfo {
     Error { peer_id: PeerId },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum MdnsEventInfo {
+    Discovered { peer_id: PeerId, address: Multiaddr },
+    Expired { peer_id: PeerId, address: Multiaddr },
+}
+
 /// Container for the swarm events a node has seen separated by protocol. Includes a timestamp
 #[derive(Default, Debug, Clone)]
 pub(crate) struct MessageHistory {
     pub identify: Vec<(IdentifyEventInfo, f32)>,
     pub kademlia: Vec<(KadEventInfo, f32)>,
+    pub mdns: Vec<(MdnsEventInfo, f32)>,
     pub swarm: Vec<(SwarmEventInfo, f32)>,
 }
 
@@ -98,6 +106,12 @@ impl MessageHistory {
     pub fn add_identify_event(&mut self, event: IdentifyEventInfo, since_start: Duration) {
         let since_start = format_duration(since_start);
         self.identify.push((event, since_start));
+    }
+
+    /// Adds a mdns event, takes the event as String and the timestamp as f32
+    pub fn add_mdns_event(&mut self, event: MdnsEventInfo, since_start: Duration) {
+        let since_start = format_duration(since_start);
+        self.mdns.push((event, since_start));
     }
 
     /// Adds a kademlia event, takes the event as String and the timestamp as f32
@@ -169,11 +183,41 @@ impl MessageHistory {
         ])
     }
 
+    pub(crate) fn format_mdns_message(&self, event: &MdnsEventInfo, time: f32) -> Line<'_> {
+        Line::from(vec![
+            Span::styled(
+                format!("{time:#?}s"),
+                Style::new().add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                "MDNS",
+                Style::new()
+                    .bg(Color::Magenta)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::raw(event.to_string()),
+        ])
+    }
+
     /// Returns kademlia messages as strings
     pub fn kad_messages(&self) -> Vec<LogMessage> {
         self.kademlia
             .iter()
             .map(|(e, t)| LogMessage::Kad {
+                event: e.to_owned(),
+                at: t.to_owned(),
+            })
+            .collect()
+    }
+
+    /// Returns mdns messages as strings
+    pub fn mdns_messages(&self) -> Vec<LogMessage> {
+        self.mdns
+            .iter()
+            .map(|(e, t)| LogMessage::Mdns {
                 event: e.to_owned(),
                 at: t.to_owned(),
             })
@@ -207,16 +251,19 @@ impl MessageHistory {
         messages.append(&mut self.kad_messages());
         messages.append(&mut self.identify_messages());
         messages.append(&mut self.swarm_messages());
+        messages.append(&mut self.mdns_messages());
 
         messages.sort_by(|a, b| {
             let a_time = match a {
                 LogMessage::Swarm { at, .. }
                 | LogMessage::Kad { at, .. }
+                | LogMessage::Mdns { at, .. }
                 | LogMessage::Identify { at, .. } => at,
             };
             let b_time = match b {
                 LogMessage::Swarm { at, .. }
                 | LogMessage::Kad { at, .. }
+                | LogMessage::Mdns { at, .. }
                 | LogMessage::Identify { at, .. } => at,
             };
 
@@ -230,6 +277,7 @@ impl MessageHistory {
             .map(|m| match m {
                 LogMessage::Kad { event, at } => self.format_kad_message(event, *at),
                 LogMessage::Swarm { event, at } => self.format_swarm_message(event, *at),
+                LogMessage::Mdns { event, at } => self.format_mdns_message(event, *at),
                 LogMessage::Identify { event, at } => self.format_identify_message(event, *at),
             })
             .collect()
@@ -298,6 +346,19 @@ impl fmt::Display for IdentifyEventInfo {
             }
             IdentifyEventInfo::Error { peer_id } => {
                 write!(f, "ERROR Trying to identify {peer_id}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for MdnsEventInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MdnsEventInfo::Expired { peer_id, address } => {
+                write!(f, "EXPIRED Mdns record expired for {peer_id} {address}")
+            }
+            MdnsEventInfo::Discovered { peer_id, address } => {
+                write!(f, "DISCOVERED Mdns peer {peer_id} {address}")
             }
         }
     }

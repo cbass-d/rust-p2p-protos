@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument};
@@ -5,7 +7,7 @@ use tracing::{debug, instrument};
 use crate::{
     error::AppError,
     messages::{NetworkCommand, NetworkEvent},
-    network::NodeNetwork,
+    network::{NodeNetwork, TransportMode},
     tui::app::App,
 };
 
@@ -18,6 +20,8 @@ pub(crate) struct SimulationBuilder {
     starting_nodes: u8,
     tick_rate: f64,
     frame_rate: f64,
+    transport: TransportMode,
+    bind_address: Option<Ipv4Addr>,
 }
 
 impl SimulationBuilder {
@@ -42,6 +46,16 @@ impl SimulationBuilder {
 
     pub fn frame_rate(mut self, frame_rate: f64) -> SimulationBuilder {
         self.frame_rate = frame_rate;
+        self
+    }
+
+    pub fn transport(mut self, transport: TransportMode) -> SimulationBuilder {
+        self.transport = transport;
+        self
+    }
+
+    pub fn bind_address(mut self, bind_address: Option<Ipv4Addr>) -> SimulationBuilder {
+        self.bind_address = bind_address;
         self
     }
 
@@ -89,6 +103,8 @@ impl SimulationBuilder {
             cancellation_token.clone(),
             self.max_nodes,
             self.starting_nodes,
+            self.transport,
+            self.bind_address,
         );
 
         Ok(Simulation { app, node_network })

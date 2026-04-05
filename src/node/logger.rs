@@ -4,7 +4,9 @@ use parking_lot::RwLock;
 
 use crate::node::{
     NodeStats,
-    history::{IdentifyEventInfo, KadEventInfo, LogMessage, MessageHistory, SwarmEventInfo},
+    history::{
+        IdentifyEventInfo, KadEventInfo, LogMessage, MdnsEventInfo, MessageHistory, SwarmEventInfo,
+    },
 };
 
 #[derive(Default)]
@@ -35,6 +37,11 @@ impl NodeLogger {
     pub fn add_swarm_event(&mut self, event: SwarmEventInfo, duration: Duration) {
         let mut message_history = self.message_history.write();
         message_history.add_swarm_event(event, duration);
+    }
+
+    pub fn add_mdns_event(&mut self, event: MdnsEventInfo, duration: Duration) {
+        let mut message_history = self.message_history.write();
+        message_history.add_mdns_event(event, duration);
     }
 
     pub fn add_kademlia_event(&mut self, event: KadEventInfo, duration: Duration) {

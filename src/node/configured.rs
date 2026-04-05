@@ -1,21 +1,27 @@
-use std::time::Instant;
+use std::{net::Ipv4Addr, time::Instant};
 
 use libp2p::{
     Multiaddr, Swarm, Transport,
-    core::transport::{MemoryTransport, upgrade},
+    core::{
+        transport::MemoryTransport,
+        upgrade::{self, Version},
+    },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     identity,
     kad::{Behaviour as Kademlia, store::MemoryStore},
+    mdns::Config as MdnsConfig,
+    mdns::tokio::Behaviour as Mdns,
     multiaddr::Protocol,
     noise,
-    swarm::{self},
-    yamux,
+    swarm::{self, behaviour::toggle::Toggle},
+    tcp, yamux,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     messages::{CommandChannel, NetworkEvent},
+    network::TransportMode,
     node::{
         IPFS_PROTO_NAME, NODE_NETWORK_AGENT, NodeError,
         base::NodeBase,
@@ -51,31 +57,62 @@ impl ConfiguredNode {
     pub fn new(
         cancellation_token: CancellationToken,
         network_event_tx: mpsc::Sender<NetworkEvent>,
+        transport: TransportMode,
+        bind_address: Option<Ipv4Addr>,
     ) -> Result<(Self, mpsc::Sender<CommandChannel>), NodeError> {
         // Build the mpsc channel where the node will be receiving commands from
         let (tx, rx) = mpsc::channel(100);
 
         let node_keys = identity::Keypair::generate_ed25519();
         let peer_id = node_keys.public().to_peer_id();
-        let node_transport = MemoryTransport::default()
-            .upgrade(upgrade::Version::V1)
-            .authenticate(
-                noise::Config::new(&node_keys).map_err(|e| NodeError::Config(e.to_string()))?,
-            )
-            .multiplex(yamux::Config::default())
-            .boxed();
+        let node_transport = match transport {
+            TransportMode::Memory => MemoryTransport::default()
+                .upgrade(upgrade::Version::V1)
+                .authenticate(
+                    noise::Config::new(&node_keys).map_err(|e| NodeError::Config(e.to_string()))?,
+                )
+                .multiplex(yamux::Config::default())
+                .boxed(),
+            TransportMode::Tcp => tcp::tokio::Transport::new(tcp::Config::default())
+                .upgrade(Version::V1)
+                .authenticate(
+                    noise::Config::new(&node_keys).map_err(|e| NodeError::Config(e.to_string()))?,
+                )
+                .multiplex(yamux::Config::default())
+                .boxed(),
+        };
 
-        let listen_address = Multiaddr::from(Protocol::Memory(rand::random::<u64>()));
+        let listen_address = match transport {
+            TransportMode::Memory => Multiaddr::from(Protocol::Memory(rand::random::<u64>())),
+            TransportMode::Tcp => {
+                let bind_address = bind_address.unwrap();
+                format!("/ip4/{bind_address}/tcp/0")
+                    .parse()
+                    .expect("invalid tcp listen address")
+            }
+        };
 
         let store = MemoryStore::new(peer_id);
         let kad = Kademlia::new(peer_id, store);
+        let mdns = match transport {
+            TransportMode::Tcp => Toggle::from(Some(
+                Mdns::new(MdnsConfig::default(), peer_id)
+                    .map_err(|e| NodeError::Config(e.to_string()))?,
+            )),
+            TransportMode::Memory => Toggle::from(None),
+        };
+
         let identify = {
             let cfg = IdentifyConfig::new(IPFS_PROTO_NAME.to_string(), node_keys.public())
                 .with_agent_version(NODE_NETWORK_AGENT.to_string());
 
             Identify::new(cfg)
         };
-        let behaviour = NodeBehaviour { kad, identify };
+        let behaviour = NodeBehaviour {
+            kad,
+            identify,
+            mdns,
+        };
 
         let swarm = Swarm::new(
             node_transport,
@@ -93,7 +130,14 @@ impl ConfiguredNode {
 
         let kad_info = KademliaInfo::new(swarm.behaviour().kad.mode(), false);
 
-        let base = NodeBase::new(peer_id, swarm, identify_info, kad_info, listen_address);
+        let base = NodeBase::new(
+            peer_id,
+            swarm,
+            identify_info,
+            kad_info,
+            listen_address,
+            bind_address,
+        );
 
         let node = ConfiguredNode {
             base,

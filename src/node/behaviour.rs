@@ -3,7 +3,8 @@ use std::fmt::Display;
 use libp2p::{
     identify,
     kad::{self, store::MemoryStore},
-    swarm::NetworkBehaviour,
+    mdns,
+    swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
 };
 
 /// Node behaviour for our peers. Currently has identify and kademlia. (more in the future)
@@ -12,6 +13,7 @@ use libp2p::{
 pub(crate) struct NodeBehaviour {
     pub kad: kad::Behaviour<MemoryStore>,
     pub identify: identify::Behaviour,
+    pub mdns: Toggle<mdns::tokio::Behaviour>,
 }
 
 /// libp2p swarm events for our node behaviour
@@ -19,6 +21,7 @@ pub(crate) struct NodeBehaviour {
 pub(crate) enum NodeNetworkEvent {
     Identify(identify::Event),
     Kademlia(kad::Event),
+    Mdns(mdns::Event),
 }
 
 impl From<identify::Event> for NodeNetworkEvent {
@@ -33,6 +36,12 @@ impl From<kad::Event> for NodeNetworkEvent {
     }
 }
 
+impl From<mdns::Event> for NodeNetworkEvent {
+    fn from(event: mdns::Event) -> Self {
+        Self::Mdns(event)
+    }
+}
+
 impl Display for NodeNetworkEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -40,6 +49,9 @@ impl Display for NodeNetworkEvent {
                 write!(f, "{event:?}")
             }
             NodeNetworkEvent::Kademlia(event) => {
+                write!(f, "{event:?}")
+            }
+            NodeNetworkEvent::Mdns(event) => {
                 write!(f, "{event:?}")
             }
         }

@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use color_eyre::{Result, eyre::Context};
 use futures::StreamExt;
 use libp2p::{
@@ -6,6 +8,7 @@ use libp2p::{
     kad::{KBucketKey, QueryId, RecordKey, RoutingUpdate},
     swarm::SwarmEvent,
 };
+use tracing::debug;
 
 use crate::node::{
     NodeError,
@@ -31,6 +34,9 @@ pub(crate) struct NodeBase {
 
     /// libp2p swarm listen address
     pub(crate) listen_address: Multiaddr,
+
+    /// Address that the node is binded to
+    pub(crate) bind_address: Option<Ipv4Addr>,
 }
 
 impl NodeBase {
@@ -40,6 +46,7 @@ impl NodeBase {
         identify_info: IdentifyInfo,
         kad_info: KademliaInfo,
         listen_address: Multiaddr,
+        bind_address: Option<Ipv4Addr>,
     ) -> Self {
         Self {
             peer_id,
@@ -47,6 +54,7 @@ impl NodeBase {
             identify_info,
             kad_info,
             listen_address,
+            bind_address,
         }
     }
 
@@ -63,6 +71,7 @@ impl NodeBase {
 
     /// Listens on the swarm address
     pub(crate) fn listen(&mut self) -> Result<ListenerId, NodeError> {
+        debug!(target: "simulation::node", "node listening on {}", self.listen_address);
         let listener_id = self.swarm.listen_on(self.listen_address.clone())?;
 
         Ok(listener_id)

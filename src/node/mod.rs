@@ -7,6 +7,7 @@ mod identify_handler;
 pub mod info;
 mod kad_handler;
 mod logger;
+mod mdns_handler;
 pub mod running;
 mod state;
 

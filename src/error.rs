@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub(crate) enum AppError {
+    #[error("bind address missing for tcp mode")]
+    NoBindAddress,
     #[error("failed to build simulation: {0}")]
     BuildError(String),
     #[error("max number of nodes is {max}")]
