@@ -40,6 +40,10 @@ pub(crate) struct NodeBox {
     /// and other components
     active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
 
+    /// Hashset containig the list of external nodes, shared by the App
+    /// and other components
+    external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+
     /// The length of the current list of active nodes
     len: usize,
 
@@ -64,14 +68,24 @@ pub(crate) struct NodeBox {
     /// ratatui Circles for each of the nodes
     node_shapes: HashMap<PeerId, Circle>,
 
+    /// Cordinataes for each of the external nodes
+    external_node_coords: HashMap<PeerId, NodeCoords>,
+
+    /// ratatui Circles for each of the external nodes
+    external_node_shapes: HashMap<PeerId, Circle>,
+
     /// The lines connecting each of the nodes/circles
     lines: HashMap<(PeerId, PeerId), Line>,
 }
 
 impl NodeBox {
-    pub fn new(active_nodes: Arc<RwLock<IndexSet<PeerId>>>) -> Self {
+    pub fn new(
+        active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+        external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+    ) -> Self {
         Self {
             active_nodes,
+            external_nodes,
             list_state: ListState::default(),
             len: 0,
             x_bound: 180.0,
@@ -79,6 +93,8 @@ impl NodeBox {
             focus: false,
             node_coords: HashMap::default(),
             node_shapes: HashMap::default(),
+            external_node_coords: HashMap::default(),
+            external_node_shapes: HashMap::default(),
             node_connections: HashMap::default(),
             lines: HashMap::new(),
         }
@@ -99,6 +115,7 @@ impl NodeBox {
         };
 
         let nodes = &self.node_shapes;
+        let external_nodes = &self.external_node_shapes;
         let connections = &self.lines;
 
         trace!(target: "app::node_box", "{} total nodes being drawn", nodes.len());
@@ -116,6 +133,9 @@ impl NodeBox {
 
                 // Draw nodes on top
                 nodes.iter().for_each(|n| ctx.draw(n.1));
+
+                // Draw external nodes on top
+                external_nodes.iter().for_each(|n| ctx.draw(n.1));
             });
 
         canvas.render(area, frame.buffer_mut());
@@ -124,7 +144,9 @@ impl NodeBox {
     fn update_selection_in_graph(&mut self) {
         let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
         let active_nodes = self.active_nodes.read().clone();
+        let external_nodes = self.external_nodes.read().clone();
         let peer = active_nodes[node_idx];
+
         // Update nodes
         self.reset_nodes();
         if let Some(circle) = self.node_shapes.get_mut(&peer) {
@@ -145,6 +167,12 @@ impl NodeBox {
         self.node_shapes.iter_mut().for_each(|(_, circle)| {
             circle.color = Color::White;
         });
+
+        self.external_node_shapes
+            .iter_mut()
+            .for_each(|(_, circle)| {
+                circle.color = Color::Blue;
+            });
     }
 
     fn reset_lines(&mut self) {
@@ -157,7 +185,7 @@ impl NodeBox {
         self.focus = focus;
     }
 
-    fn generate_node_on_canvas(&mut self, peer: &PeerId) -> Circle {
+    fn generate_node_on_canvas(&mut self, peer: &PeerId, is_external: bool) -> Circle {
         let min_distance = 50.0;
         loop {
             let x = rand::random_range(-self.x_bound + 15.0..=self.x_bound - 15.0);
@@ -170,15 +198,25 @@ impl NodeBox {
             });
 
             if valid {
-                self.node_coords
-                    .insert(peer.to_owned(), NodeCoords { x, y });
-
-                return Circle {
-                    x,
-                    y,
-                    radius: RADIUS,
-                    color: Color::White,
-                };
+                if is_external {
+                    self.external_node_coords
+                        .insert(peer.to_owned(), NodeCoords { x, y });
+                    return Circle {
+                        x,
+                        y,
+                        radius: RADIUS,
+                        color: Color::Blue,
+                    };
+                } else {
+                    self.node_coords
+                        .insert(peer.to_owned(), NodeCoords { x, y });
+                    return Circle {
+                        x,
+                        y,
+                        radius: RADIUS,
+                        color: Color::White,
+                    };
+                }
             }
         }
     }
@@ -286,7 +324,7 @@ impl NodeBox {
                 debug!(target: "app::node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
 
                 self.len += 1;
-                let node = self.generate_node_on_canvas(peer_id);
+                let node = self.generate_node_on_canvas(peer_id, false);
                 self.node_shapes.insert(*peer_id, node);
                 self.node_connections
                     .insert(*peer_id, node_connections.clone());
@@ -301,6 +339,12 @@ impl NodeBox {
                         peer_id: active_nodes[0],
                     });
                 }
+            }
+            Action::AddExternalNode { peer_id } => {
+                debug!(target: "app::node_box", "adding new external node {}", peer_id);
+
+                let node = self.generate_node_on_canvas(peer_id, true);
+                self.external_node_shapes.insert(*peer_id, node);
             }
             Action::RemoveNode { peer_id } => {
                 self.len -= 1;

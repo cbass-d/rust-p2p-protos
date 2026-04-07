@@ -6,12 +6,16 @@ use mdns::Event as MdnsEvent;
 use tracing::{debug, info, warn};
 
 use crate::{
+    messages::NetworkEvent,
     node::{history::MdnsEventInfo, running::RunningNode},
     util,
 };
 
 /// Handle an incoming identify event
-pub(crate) fn handle_event(node: &mut RunningNode, event: MdnsEvent) -> Result<()> {
+pub(crate) fn handle_event(
+    node: &mut RunningNode,
+    event: MdnsEvent,
+) -> Result<Option<NetworkEvent>> {
     match event {
         MdnsEvent::Discovered(v) => {
             let (peer_id, address) = &v[0];
@@ -46,6 +50,8 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: MdnsEvent) -> Result<(
                     }
                 }
             }
+
+            return Ok(Some(NetworkEvent::NodeDiscovered { peer_id: *peer_id }));
         }
         MdnsEvent::Expired(v) => {
             let (peer_id, address) = &v[0];
@@ -59,8 +65,8 @@ pub(crate) fn handle_event(node: &mut RunningNode, event: MdnsEvent) -> Result<(
                 },
                 Instant::now().duration_since(node.state.start()),
             );
+
+            return Ok(Some(NetworkEvent::NodeExpired { peer_id: *peer_id }));
         }
     }
-
-    Ok(())
 }

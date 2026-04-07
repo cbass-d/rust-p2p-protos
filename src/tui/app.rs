@@ -55,6 +55,9 @@ pub(crate) enum Action {
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
     },
 
+    /// Add an external node to the TUI
+    AddExternalNode { peer_id: PeerId },
+
     /// Update connections in the TUI when a connection between two nodes is established
     UpdateConnections { peer_one: PeerId, peer_two: PeerId },
 
@@ -107,6 +110,9 @@ pub(crate) struct App {
     /// List of active nodes in the network
     active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
 
+    /// List of active nodes in the network
+    external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+
     /// MPSC channel for receiving events from the node network to be
     /// reflected by the TUI
     network_event_rx: mpsc::Receiver<NetworkEvent>,
@@ -154,19 +160,21 @@ impl App {
         frame_rate: f64,
     ) -> Self {
         let active_nodes = Arc::new(RwLock::new(IndexSet::new()));
+        let external_nodes = Arc::new(RwLock::new(IndexSet::new()));
         Self {
             quit: false,
             cancellation_token,
             network_event_rx,
             network_command_tx,
-            node_box: NodeBox::new(active_nodes.clone()),
+            node_box: NodeBox::new(active_nodes.clone(), external_nodes.clone()),
             node_log: NodeLog::new(),
-            node_list: NodeList::new(active_nodes.clone()),
+            node_list: NodeList::new(active_nodes.clone(), external_nodes.clone()),
             popup: Popup::new(active_nodes.clone()),
             actions: VecDeque::new(),
             focus: Focus::NodeList,
             node_logs: HashMap::new(),
             active_nodes,
+            external_nodes,
             tick_rate,
             frame_rate,
         }
@@ -450,6 +458,19 @@ impl App {
 
                 actions.push_back(Action::UpdateConnections { peer_one, peer_two });
             }
+            NetworkEvent::NodeDiscovered { peer_id } => {
+                debug!(target: "TUI", "adding external node to TUI {}", peer_id);
+
+                // Check if the external node has already being added by another internal node
+                let already_added = self.external_nodes.read().contains(&peer_id)
+                    || self.active_nodes.read().contains(&peer_id);
+                if !already_added {
+                    let mut external_nodes = self.external_nodes.write();
+                    external_nodes.insert(peer_id);
+                    actions.push_back(Action::AddExternalNode { peer_id });
+                }
+            }
+            NetworkEvent::NodeExpired { peer_id } => {}
             NetworkEvent::NodesDisconnected { .. } => {}
             NetworkEvent::MaxNodes => {}
             NetworkEvent::IdentifyInfo { info } => {

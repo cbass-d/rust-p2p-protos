@@ -29,6 +29,12 @@ pub(crate) enum NetworkEvent {
     /// Two nodes have established a connection between each other
     NodesConnected { peer_one: PeerId, peer_two: PeerId },
 
+    /// A node has been discovered using MDNS
+    NodeDiscovered { peer_id: PeerId },
+
+    /// A MDNS record has expired so node has to be removed
+    NodeExpired { peer_id: PeerId },
+
     /// Two nodes have closed the connection between each other
     NodesDisconnected { peer_one: PeerId, peer_two: PeerId },
 

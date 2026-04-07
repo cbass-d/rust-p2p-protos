@@ -1,14 +1,15 @@
 mod base;
 mod behaviour;
-pub mod configured;
+pub(crate) mod configured;
 mod connection_tracker;
-pub mod history;
+pub(crate) mod external;
+pub(crate) mod history;
 mod identify_handler;
-pub mod info;
+pub(crate) mod info;
 mod kad_handler;
 mod logger;
 mod mdns_handler;
-pub mod running;
+pub(crate) mod running;
 mod state;
 
 use core::fmt;

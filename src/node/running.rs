@@ -283,8 +283,17 @@ impl RunningNode {
             SwarmEvent::Behaviour(NodeNetworkEvent::Mdns(event)) => {
                 debug!(target: "simulation::node", "new mdns event been added");
 
-                if let Err(e) = mdns_handler::handle_event(self, event) {
-                    warn!(target: "simulation::node", "failed to handle kad event: {e}");
+                match mdns_handler::handle_event(self, event) {
+                    Err(e) => {
+                        warn!(target: "simulation::node", "failed to handle kad event: {e}");
+                    }
+                    Ok(Some(network_event)) => {
+                        // Send out event that the node is now running
+                        if let Err(e) = self.network_event_tx.send(network_event).await {
+                            warn!(target: "simulation::node", "failed to send mdns network event: {e}");
+                        }
+                    }
+                    _ => {}
                 }
             }
             other => {
