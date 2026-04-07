@@ -14,13 +14,13 @@ use ratatui::{
     style::Color,
     symbols::Marker,
     widgets::{
-        Block, Borders, ListState, Widget,
+        Block, Borders, ListState, ScrollbarState, Widget,
         canvas::{Canvas, Circle, Line},
     },
 };
 use tracing::{debug, trace};
 
-use crate::tui::app::Action;
+use crate::tui::{app::Action, components::node_list::Lists};
 
 /// Radius of the circles representing the nodes
 const RADIUS: f64 = 12.0;
@@ -43,6 +43,15 @@ pub(crate) struct NodeBox {
     /// Hashset containig the list of external nodes, shared by the App
     /// and other components
     external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+
+    /// Which list has focus
+    node_list: Lists,
+
+    /// The state of the list of internal nodes (currently selected, next, etc.)
+    internal_list_state: ListState,
+
+    /// The state of the external list of nodes (currently selected, next, etc.) pub external_list_state: ListState,
+    external_list_state: ListState,
 
     /// The length of the current list of active nodes
     len: usize,
@@ -96,6 +105,9 @@ impl NodeBox {
             external_node_coords: HashMap::default(),
             external_node_shapes: HashMap::default(),
             node_connections: HashMap::default(),
+            internal_list_state: ListState::default(),
+            external_list_state: ListState::default(),
+            node_list: Lists::Internal,
             lines: HashMap::new(),
         }
     }
@@ -277,14 +289,32 @@ impl NodeBox {
     ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
-                self.select_previous();
-
-                // Get the index of the newly selected node
-                self.update_selection_in_graph();
+                match self.node_list {
+                    Lists::Internal => {
+                        self.select_previous();
+                        // Get the index of the newly selected node
+                        self.update_selection_in_graph();
+                    }
+                    Lists::External => {}
+                }
             }
             KeyCode::Down => {
-                self.select_next();
-                self.update_selection_in_graph();
+                match self.node_list {
+                    Lists::Internal => {
+                        self.select_next();
+                        // Get the index of the newly selected node
+                        self.update_selection_in_graph();
+                    }
+                    Lists::External => {}
+                }
+            }
+            KeyCode::Char('e') => {
+                if !self.external_nodes.read().is_empty() {
+                    self.node_list = match self.node_list {
+                        Lists::Internal => Lists::External,
+                        Lists::External => Lists::Internal,
+                    }
+                }
             }
             _ => {}
         }
