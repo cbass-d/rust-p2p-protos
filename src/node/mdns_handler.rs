@@ -3,7 +3,7 @@ use std::time::Instant;
 use color_eyre::eyre::Result;
 use libp2p::mdns;
 use mdns::Event as MdnsEvent;
-use tracing::{debug, info, warn};
+use tracing::{debug, instrument, warn};
 
 use crate::{
     messages::NetworkEvent,
@@ -11,7 +11,8 @@ use crate::{
     util,
 };
 
-/// Handle an incoming identify event
+/// Handle an incoming mdns event
+#[instrument(skip_all, name = "mdns_event")]
 pub(crate) fn handle_event(
     node: &mut RunningNode,
     event: MdnsEvent,
@@ -20,7 +21,7 @@ pub(crate) fn handle_event(
         MdnsEvent::Discovered(v) => {
             let (peer_id, address) = &v[0];
 
-            debug!(target: "simulation::node::mdns_events", "mdns discovered peer {peer_id} {address}");
+            debug!(target: "simulation::node::mdns_events", %peer_id, %address, "mdns discovered peer");
 
             node.logger.add_mdns_event(
                 MdnsEventInfo::Discovered {
@@ -36,8 +37,6 @@ pub(crate) fn handle_event(
 
             let ip = util::extract_ip(address).expect("mdns record has not ip address");
 
-            debug!(target: "simulation::node::mdns_events", "address is loopback: {is_loopback}");
-
             if let Some(bind_address) = node.base.bind_address
                 && bind_address == ip
             {
@@ -46,7 +45,7 @@ pub(crate) fn handle_event(
                         debug!(target: "simulation::node::mdns_events", "dialed peer from mdns discovery");
                     }
                     Err(e) => {
-                        warn!(target: "simulation::node::mdns_events", "failed to dial peer from mdns discovery: {e}");
+                        warn!(target: "simulation::node::mdns_events", error = %e, "failed to dial peer from mdns discovery");
                     }
                 }
             }
@@ -56,7 +55,7 @@ pub(crate) fn handle_event(
         MdnsEvent::Expired(v) => {
             let (peer_id, address) = &v[0];
 
-            debug!(target: "simulation::node::mdns_events", "mdns record expired for {peer_id} {address}");
+            debug!(target: "simulation::node::mdns_events", %peer_id, %address, "mdns record expired");
 
             node.logger.add_mdns_event(
                 MdnsEventInfo::Expired {

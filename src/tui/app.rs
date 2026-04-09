@@ -312,6 +312,8 @@ impl App {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
 
+                debug!(target: "app", %peer_id, "tui sent GetIdentifyInfo network command");
+
                 self.unfocus_list_graph();
             }
             Action::DisplayKademliaInfo { peer_id } => {
@@ -324,6 +326,8 @@ impl App {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
 
+                debug!(target: "app", %peer_id, "tui sent GetKademliaInfo network command");
+
                 self.unfocus_list_graph();
             }
             Action::ConnectTo { peer_one, peer_two } => {
@@ -334,6 +338,8 @@ impl App {
                 {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
+
+                debug!(target: "app", %peer_one, %peer_two, "tui sent ConnectTo network command");
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
                 if let Err(e) = self
@@ -343,6 +349,8 @@ impl App {
                 {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
+
+                debug!(target: "app", %peer_one, %peer_two, "tui sent DisconnectFrom network command");
             }
             Action::StopNode { peer_id } => {
                 if let Err(e) = self
@@ -352,6 +360,8 @@ impl App {
                 {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
+
+                debug!(target: "app", %peer_id, "tui sent StopNode network command");
             }
             Action::RemoveNode { .. } => {
                 self.focus_list_graph();
@@ -365,6 +375,8 @@ impl App {
                 {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
+
+                debug!(target: "app", "tui sent StartNode network command");
             }
             Action::ClosePopup => {
                 self.close_popup();
@@ -408,7 +420,7 @@ impl App {
         match event {
             TuiEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 if let Err(e) = self.handle_key_event(key_event, actions).await {
-                    warn!("failed to handle TUI key event: {e}");
+                    warn!(target: "app", error = %e, "failed to handle TUI key event: {e}");
                 }
             }
             _ => {}

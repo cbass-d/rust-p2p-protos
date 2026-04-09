@@ -15,7 +15,7 @@ use color_eyre::eyre::Result;
 use network::TransportMode;
 use tracing::{error, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{self, EnvFilter, layer::SubscriberExt};
+use tracing_subscriber::{self, EnvFilter, Layer, layer::SubscriberExt};
 
 use crate::{cli::CliArgs, error::AppError, simulation::Simulation};
 
@@ -30,12 +30,16 @@ fn init_tracing() -> Result<WorkerGuard, AppError> {
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     let subscriber = tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
+        .with(console_subscriber::spawn())
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(non_blocking)
-                .with_ansi(false),
-        );
+                .with_ansi(true)
+                .with_filter(EnvFilter::try_from_default_env().unwrap_or(
+                        EnvFilter::new("info,libp2p_mdns=warn,libp2p_swarm=warn,libp2p_kad=warn,libp2p_identify=warn,libp2p_noise=warn,libp2p_tcp=warn,libp2p_yamux=warn")
+                        )),
+        )
+        .with(tracing_error::ErrorLayer::default());
 
     tracing::subscriber::set_global_default(subscriber)?;
 

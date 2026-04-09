@@ -2,7 +2,7 @@ use std::net::Ipv4Addr;
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument};
+use tracing::{debug, error, instrument};
 
 use crate::{
     error::AppError,
@@ -107,7 +107,11 @@ impl SimulationBuilder {
             self.bind_address,
         );
 
-        Ok(Simulation { app, node_network })
+        Ok(Simulation {
+            app,
+            node_network,
+            cancellation_token,
+        })
     }
 }
 
@@ -115,6 +119,7 @@ impl SimulationBuilder {
 pub(crate) struct Simulation {
     app: App,
     node_network: NodeNetwork,
+    cancellation_token: CancellationToken,
 }
 
 impl Simulation {
@@ -125,14 +130,22 @@ impl Simulation {
     #[instrument(skip_all)]
     pub async fn run(self) -> Result<(), AppError> {
         let mut app = self.app;
-
         let mut node_network = self.node_network;
 
-        let (app_result, network_result) = tokio::try_join!(app.run(), node_network.run())?;
+        let result = tokio::select! {
+            result = app.run() => result,
+            result = node_network.run() => {
+                match &result {
+                    Ok(()) => debug!(target: "simulation", "node network has finished"),
+                    Err(e) => error!(target: "simulation", "node network exited with an error: {e}"),
+                }
+                self.cancellation_token.cancel();
+                result.map_err(AppError::from)
+            }
+        };
 
-        debug!(target: "simulation", "tui app task ended: {app_result:#?}");
-        debug!(target: "simulation", "node network task ended: {network_result:#?}");
+        ratatui::restore();
 
-        Ok(())
+        result
     }
 }

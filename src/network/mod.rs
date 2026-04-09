@@ -119,7 +119,7 @@ impl NodeNetwork {
     /// Main run loop of for the Node Network
     #[instrument(skip_all, name = "run network")]
     pub async fn run(&mut self) -> Result<(), AppError> {
-        info!(target: "simulation::network", "node network running with {} nodes", self.nodes.len());
+        info!(target: "simulation::network", node_count = self.nodes.len(), "node network running");
 
         self.network_start = Instant::now();
 
@@ -134,10 +134,24 @@ impl NodeNetwork {
                     break;
                 }
                 Some(command) = self.network_command_rx.recv() => {
-                    debug!(target: "simulation::network", "network command received {:?}", command);
+                    debug!(target: "simulation::network", ?command, "network command received");
 
                     self.handle_network_command(command, &mut node_task_set).await;
                 },
+                Some(node_result) = node_task_set.join_next() => {
+                    match node_result {
+                        Ok(result) => {
+                            info!(target: "simulation::network", ?result, "node exited");
+                        }
+                        Err(error) => {
+                            error!(target: "simulation::network", %error, "node task panicked");
+                        }
+                    }
+
+                    if node_task_set.is_empty() {
+                        return Err(AppError::AllNodesExited.into());
+                    }
+                }
             }
         }
 
@@ -147,10 +161,10 @@ impl NodeNetwork {
         while let Some(node_result) = node_task_set.join_next().await {
             match node_result {
                 Ok(result) => {
-                    info!(target: "simulation::network", "node exited successfully: {result:#?}");
+                    info!(target: "simulation::network", ?result, "node exited");
                 }
                 Err(error) => {
-                    error!(target: "simulation::network", "node exited with error: {error:#?}");
+                    error!(target: "simulation::network", %error, "node task panicked");
                 }
             }
         }
@@ -169,7 +183,7 @@ impl NodeNetwork {
             let node = match self.add_node() {
                 Ok(node) => node,
                 Err(e) => {
-                    warn!(target: "simulation::network", "failed to build node: {e}");
+                    warn!(target: "simulation::network", error = %e, "failed to build node");
                     continue;
                 }
             };
@@ -196,6 +210,7 @@ impl NodeNetwork {
 
     /// Handle a network command received from the TUI. Takes in the network command and
     /// the task set of the running nodes. We return the task set with updates, if any
+    #[instrument(skip_all, name = "network_command")]
     async fn handle_network_command(
         &mut self,
         command: NetworkCommand,
@@ -216,17 +231,17 @@ impl NodeNetwork {
                         ))
                         .await
                     {
-                        warn!(target: "simulation::network", "failed to send connect command: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to send connect command");
                     }
 
                     let response = reply_rx.await;
 
                     match response {
                         Ok(NodeResponse::Dialed { addr }) => {
-                            debug!(target: "simulation::network", "node dialed peer address: {addr}");
+                            debug!(target: "simulation::network", %addr, "node dialed peer");
                         }
                         Ok(NodeResponse::Failed) => {
-                            warn!(target: "simulation::network", "node failed to dial peer {peer_two}");
+                            warn!(target: "simulation::network", %peer_two, "node failed to dial peer");
                         }
                         _ => {}
                     }
@@ -239,14 +254,14 @@ impl NodeNetwork {
                         .send((NodeCommand::DisconnectFrom { peer: peer_two }, tx))
                         .await
                     {
-                        warn!(target: "simulation::network", "failed to send disconnect command: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to send disconnect command");
                     }
 
                     let response = reply_rx.await;
 
                     match response {
                         Ok(NodeResponse::Disconnected { peer }) => {
-                            debug!(target: "simulation::network", "nodes disconnected {peer_one} =/= {peer_two}");
+                            debug!(target: "simulation::network", %peer_one, %peer_two, "nodes disconnected");
 
                             if let Err(e) = self
                                 .network_event_tx
@@ -256,11 +271,11 @@ impl NodeNetwork {
                                 })
                                 .await
                             {
-                                warn!(target: "simulation::network", "failed to send disconnect network event: {e}");
+                                warn!(target: "simulation::network", error = %e, "failed to send disconnect network event");
                             }
                         }
                         Ok(NodeResponse::Failed) => {
-                            warn!(target: "simulation::network", "nodes failed to disconnect {peer_one} -> {peer_two}");
+                            warn!(target: "simulation::network", %peer_one, %peer_two, "nodes failed to disconnect");
                         }
                         _ => {}
                     }
@@ -271,25 +286,25 @@ impl NodeNetwork {
                     let (tx, reply_rx) = oneshot::channel();
 
                     if let Err(e) = node_channel.send((NodeCommand::GetIdentifyInfo, tx)).await {
-                        warn!(target: "simulation::network", "failed to send identify info command: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to send identify info command");
                     }
 
                     let response = reply_rx.await;
 
                     match response {
                         Ok(NodeResponse::IdentifyInfo { info }) => {
-                            debug!(target: "simulation::network", "received identify info: {:?}", info);
+                            debug!(target: "simulation::network", ?info, "received identify info");
 
                             if let Err(e) = self
                                 .network_event_tx
                                 .send(NetworkEvent::IdentifyInfo { info })
                                 .await
                             {
-                                warn!(target: "simulation::network", "failed to send identify info network event: {e}");
+                                warn!(target: "simulation::network", error = %e, "failed to send identify info network event");
                             }
                         }
                         Ok(NodeResponse::Failed) => {
-                            warn!(target: "simulation::network", "nodes failed send identify info {peer_id}");
+                            warn!(target: "simulation::network", %peer_id, "node failed to send identify info");
                         }
                         _ => {}
                     }
@@ -300,25 +315,25 @@ impl NodeNetwork {
                     let (tx, reply_rx) = oneshot::channel();
 
                     if let Err(e) = node_channel.send((NodeCommand::GetKademliaInfo, tx)).await {
-                        warn!(target: "simulation::network", "failed to send kad info command: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to send kad info command");
                     }
 
                     let response = reply_rx.await;
 
                     match response {
                         Ok(NodeResponse::KademliaInfo { info }) => {
-                            debug!(target: "simulation::network", "received kademlia info: {:?}", info );
+                            debug!(target: "simulation::network", ?info, "received kademlia info");
 
                             if let Err(e) = self
                                 .network_event_tx
                                 .send(NetworkEvent::KademliaInfo { info })
                                 .await
                             {
-                                warn!(target: "simulation::network", "failed to send kad info network event: {e}");
+                                warn!(target: "simulation::network", error = %e, "failed to send kad info network event");
                             }
                         }
                         Ok(NodeResponse::Failed) => {
-                            warn!(target: "simulation::network", "nodes failed send kad info {peer_id}");
+                            warn!(target: "simulation::network", %peer_id, "node failed to send kad info");
                         }
                         _ => {}
                     }
@@ -329,18 +344,18 @@ impl NodeNetwork {
                     let (tx, reply_rx) = oneshot::channel();
 
                     if let Err(e) = node_channel.send((NodeCommand::Stop, tx)).await {
-                        warn!(target: "simulation::network", "failed to send stop command: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to send stop command");
                     }
 
                     let response = reply_rx.await;
 
                     match response {
                         Ok(NodeResponse::Stopped) => {
-                            debug!(target: "simulation::network", "node stopped: {peer_id}");
+                            debug!(target: "simulation::network", %peer_id, "node stopped");
                             self.remove_node(&peer_id);
                         }
                         Ok(NodeResponse::Failed) => {
-                            warn!(target: "simulation::network", "nodes failed to stop: {peer_id}");
+                            warn!(target: "simulation::network", %peer_id, "node failed to stop");
                         }
                         _ => {}
                     }
@@ -350,7 +365,7 @@ impl NodeNetwork {
                 // We limit the amount of nodes to 10
                 if self.nodes.len() >= self.max_nodes as usize {
                     if let Err(e) = self.network_event_tx.send(NetworkEvent::MaxNodes).await {
-                        warn!(target: "simulation::network", "failed to send max nodes network event: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to send max nodes network event");
                     }
 
                     return;
@@ -371,7 +386,7 @@ impl NodeNetwork {
                         });
                     }
                     Err(e) => {
-                        warn!(target: "simulation::network", "failed to build node: {e}");
+                        warn!(target: "simulation::network", error = %e, "failed to build node");
                     }
                 }
 

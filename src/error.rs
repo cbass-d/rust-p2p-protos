@@ -6,6 +6,8 @@ pub(crate) enum AppError {
     NoBindAddress,
     #[error("failed to build simulation: {0}")]
     BuildError(String),
+    #[error("all nodes exited")]
+    AllNodesExited,
     #[error("max number of nodes is {max}")]
     MaxNodes { max: u8 },
     #[error("tracing subscriber error: {0}")]

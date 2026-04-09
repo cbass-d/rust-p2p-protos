@@ -54,7 +54,7 @@ impl ConnectionTracker {
     }
 
     pub(crate) fn remove_active_peer(&mut self, peer_id: &PeerId) {
-        debug!(target: "simulation::node::connection_tracker", "removin gpeer {} from node connections", peer_id);
+        debug!(target: "simulation::node::connection_tracker", "removing peer {} from node connections", peer_id);
         let mut current_peers = self.current_peers.write();
         current_peers.remove(peer_id);
     }

@@ -11,7 +11,6 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-use tracing::debug;
 
 pub(crate) enum LogMessage {
     Swarm { event: SwarmEventInfo, at: f32 },

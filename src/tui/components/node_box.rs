@@ -245,8 +245,14 @@ impl NodeBox {
     }
 
     fn connect_two_nodes(&mut self, peer_one: PeerId, peer_two: PeerId) {
-        let circle_one = self.node_shapes.get(&peer_one);
-        let circle_two = self.node_shapes.get(&peer_two);
+        let circle_one = self
+            .node_shapes
+            .get(&peer_one)
+            .or_else(|| self.external_node_shapes.get(&peer_one));
+        let circle_two = self
+            .node_shapes
+            .get(&peer_two)
+            .or_else(|| self.external_node_shapes.get(&peer_two));
 
         debug!(target: "app::node_box", "attempting to connect {peer_one} and {peer_two}");
 
