@@ -1,19 +1,22 @@
 use std::net::Ipv4Addr;
 
+use color_eyre::{Result, eyre::Context};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, instrument};
+use tracing::instrument;
 
 use crate::{
+    bus::EventBus,
     error::AppError,
     messages::{NetworkCommand, NetworkEvent},
     network::{NodeNetwork, TransportMode},
     tui::app::App,
 };
 
-const EVENT_CHANNEL_SIZE: usize = 10;
-const COMMAND_CHANNEL_SIZE: usize = 10;
+const EVENT_CHANNEL_SIZE: usize = 100;
+const COMMAND_CHANNEL_SIZE: usize = 100;
 
+/// Fluent builder for [`Simulation`].
 #[derive(Debug, Default)]
 pub(crate) struct SimulationBuilder {
     max_nodes: u8,
@@ -82,8 +85,8 @@ impl SimulationBuilder {
             )));
         }
 
-        let (network_event_tx, network_event_rx) =
-            mpsc::channel::<NetworkEvent>(EVENT_CHANNEL_SIZE);
+        let event_bus = EventBus::<NetworkEvent>::new(EVENT_CHANNEL_SIZE);
+        let network_event_rx = event_bus.subscribe();
         let (network_command_tx, network_command_rx) =
             mpsc::channel::<NetworkCommand>(COMMAND_CHANNEL_SIZE);
 
@@ -95,10 +98,11 @@ impl SimulationBuilder {
             network_command_tx,
             self.tick_rate,
             self.frame_rate,
+            self.transport,
         );
 
         let node_network = NodeNetwork::new(
-            network_event_tx,
+            event_bus,
             network_command_rx,
             cancellation_token.clone(),
             self.max_nodes,
@@ -115,6 +119,7 @@ impl SimulationBuilder {
     }
 }
 
+/// Top-level handle that drives the TUI and node network concurrently.
 #[derive(Debug)]
 pub(crate) struct Simulation {
     app: App,
@@ -128,19 +133,18 @@ impl Simulation {
     }
 
     #[instrument(skip_all)]
-    pub async fn run(self) -> Result<(), AppError> {
+    pub async fn run(self) -> Result<()> {
         let mut app = self.app;
         let mut node_network = self.node_network;
 
         let result = tokio::select! {
-            result = app.run() => result,
-            result = node_network.run() => {
-                match &result {
-                    Ok(()) => debug!(target: "simulation", "node network has finished"),
-                    Err(e) => error!(target: "simulation", "node network exited with an error: {e}"),
-                }
+            result = app.run() => {
                 self.cancellation_token.cancel();
-                result.map_err(AppError::from)
+                result.wrap_err("failed to run tui application")
+            }
+            result = node_network.run() => {
+                self.cancellation_token.cancel();
+                result.wrap_err("failed to run node network")
             }
         };
 

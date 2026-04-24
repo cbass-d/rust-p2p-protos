@@ -3,12 +3,11 @@ mod behaviour;
 pub(crate) mod configured;
 mod connection_tracker;
 pub(crate) mod external;
+pub(crate) mod handlers;
 pub(crate) mod history;
-mod identify_handler;
 pub(crate) mod info;
 mod kad_handler;
 mod logger;
-mod mdns_handler;
 pub(crate) mod running;
 mod state;
 
@@ -31,6 +30,12 @@ pub(crate) enum NodeError {
     SwarmStreamEnded,
     #[error("kad bootstrap failed: {0}")]
     KadBootstrapFailed(#[from] libp2p::kad::NoKnownPeers),
+    #[error("error while handling mdns event: {0}")]
+    MdnsHandler(String),
+    #[error("error while handling kad event: {0}")]
+    KadHandler(String),
+    #[error("error while handling identify event: {0}")]
+    IdentifyHandler(String),
 }
 
 /// The result after a node has stopped running

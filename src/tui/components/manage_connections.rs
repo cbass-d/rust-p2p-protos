@@ -1,9 +1,5 @@
 use color_eyre::eyre::Result;
-use parking_lot::RwLock;
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, trace};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -11,13 +7,36 @@ use indexmap::IndexSet;
 use libp2p::PeerId;
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListState, Padding, Paragraph, Widget},
 };
 
-use crate::tui::{app::Action, components::popup::PopUpContent};
+use tracing::warn;
+
+use crate::tui::{
+    action_queue::ActionQueue,
+    app::Action,
+    components::popup::PopUpContent,
+    event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+};
+
+/// Which list currently receives navigation and action keys
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Internal,
+    External,
+}
+
+impl Focus {
+    fn toggle(self) -> Self {
+        match self {
+            Focus::Internal => Focus::External,
+            Focus::External => Focus::Internal,
+        }
+    }
+}
 
 /// Component for managing the connections for a node in the network. Connections can be
 /// established or deleted.
@@ -26,29 +45,24 @@ pub(crate) struct ManageConnections {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
-    /// Hashset containig the list of active nodes, shared by the App
-    /// and other components
-    active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
+    /// Which of the two lists is currently focused
+    focus: Focus,
 
-    /// Hashmap representing the connections between the nodes
-    node_connections: HashMap<PeerId, Arc<RwLock<HashSet<PeerId>>>>,
+    /// Selection state for the internal-peer list
+    pub internal_state: ListState,
 
-    /// The length of the current list of active nodes
-    len: usize,
-
-    /// The state of the list (currently selected, next, etc.)
-    pub list_state: ListState,
+    /// Selection state for the external-peer list
+    pub external_state: ListState,
 }
 
 impl ManageConnections {
     /// Build a fresh `ManageConnections` component
-    pub fn new(active_nodes: Arc<RwLock<IndexSet<PeerId>>>) -> Self {
+    pub fn new() -> Self {
         Self {
             node: None,
-            active_nodes,
-            node_connections: HashMap::default(),
-            len: 0,
-            list_state: ListState::default(),
+            focus: Focus::Internal,
+            internal_state: ListState::default(),
+            external_state: ListState::default(),
         }
     }
 
@@ -57,86 +71,132 @@ impl ManageConnections {
         self.node = Some(node);
     }
 
-    pub fn select_next(&mut self) {
-        self.list_state.select_next();
+    fn focused_state(&mut self) -> &mut ListState {
+        match self.focus {
+            Focus::Internal => &mut self.internal_state,
+            Focus::External => &mut self.external_state,
+        }
     }
 
-    pub fn select_previous(&mut self) {
-        self.list_state.select_previous();
+    /// Active nodes excluding the current node — the peers you can connect to / disconnect from
+    fn internal_peers(active_nodes: &IndexSet<PeerId>, current: PeerId) -> Vec<PeerId> {
+        active_nodes
+            .iter()
+            .copied()
+            .filter(|p| *p != current)
+            .collect()
     }
 
-    /// Moving up and down the listcan move past the bounds of the list,
-    /// we must make sure it does not
-    pub fn clamp(&mut self, idx: usize) -> usize {
-        if idx >= self.len { self.len - 1 } else { idx }
+    /// Resolve a selection against a list
+    fn resolve_selection(state: &ListState, peers: &[PeerId]) -> Option<PeerId> {
+        if peers.is_empty() {
+            return None;
+        }
+        let idx = state.selected().unwrap_or(0).min(peers.len() - 1);
+        Some(peers[idx])
     }
 
     /// Handle a key event comming from the TUI
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        actions: &mut ActionQueue,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
+        show_external: bool,
     ) -> Result<()> {
-        if let Some(peer_id) = self.node {
-            match key_event.code {
-                KeyCode::Up => {
-                    self.select_previous();
-                }
-                KeyCode::Down => {
-                    self.select_next();
-                }
-                KeyCode::Char('c') => {
-                    let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                    let active_nodes = self.active_nodes.read();
+        let Some(peer_id) = self.node else {
+            return Ok(());
+        };
 
-                    debug!(target: "app::manage_connections", "connecting to peer: {}", active_nodes[node_idx]);
+        // If external is hidden, force focus to internal regardless of prior state
+        if !show_external && self.focus == Focus::External {
+            self.focus = Focus::Internal;
+        }
 
-                    actions.push_back(Action::ConnectTo {
+        match key_event.code {
+            KeyCode::Tab if show_external => self.focus = self.focus.toggle(),
+            KeyCode::Up => self.focused_state().select_previous(),
+            KeyCode::Down => self.focused_state().select_next(),
+            KeyCode::Char('c') => {
+                if let Some(peer_two) = self.selected_target(active_nodes, external_nodes, peer_id)
+                {
+                    debug!(target: "app::manage_connections", %peer_two, "connecting to peer");
+                    actions.push(Action::ConnectTo {
                         peer_one: peer_id,
-                        peer_two: active_nodes[node_idx],
+                        peer_two,
                     });
                 }
-                KeyCode::Char('d') => {
-                    let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-                    let active_nodes = self.active_nodes.read();
-
-                    debug!(target: "app::manage_connections", "disconnecting from peer: {}", active_nodes[node_idx]);
-
-                    let peer_two = active_nodes[node_idx];
-                    if peer_two != peer_id {
-                        actions.push_back(Action::DisconnectFrom {
-                            peer_one: peer_id,
-                            peer_two,
-                        });
-                    }
-                }
-                // We return back to the node commands when pressing esc (exit)
-                KeyCode::Esc => {
-                    actions.push_back(Action::Popup {
-                        content: PopUpContent::NodeCommands,
-                        peer_id,
-                    });
-                }
-                _ => {}
             }
+            KeyCode::Char('d') => {
+                if let Some(peer_two) = self.selected_target(active_nodes, external_nodes, peer_id)
+                {
+                    debug!(target: "app::manage_connections", %peer_two, "disconnecting from peer");
+                    actions.push(Action::DisconnectFrom {
+                        peer_one: peer_id,
+                        peer_two,
+                    });
+                }
+            }
+            KeyCode::Esc => {
+                actions.push(Action::Popup {
+                    content: PopUpContent::NodeCommands,
+                    peer_id,
+                });
+            }
+            _ => {}
         }
 
         Ok(())
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    /// Resolve the currently-focused selection to a `PeerId`
+    fn selected_target(
+        &self,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
+        current: PeerId,
+    ) -> Option<PeerId> {
+        match self.focus {
+            Focus::Internal => {
+                let internal = Self::internal_peers(active_nodes, current);
+                Self::resolve_selection(&self.internal_state, &internal)
+            }
+            Focus::External => {
+                let external: Vec<PeerId> = external_nodes.iter().copied().collect();
+                Self::resolve_selection(&self.external_state, &external)
+            }
+        }
+    }
+
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
+        node_connections: &HashMap<PeerId, HashSet<PeerId>>,
+        show_external: bool,
+    ) {
         Clear.render(area, frame.buffer_mut());
 
-        let footer_text = Line::from(vec![
-            Span::raw("<Esc> exit"),
-            Span::raw(", "),
+        if !show_external && self.focus == Focus::External {
+            self.focus = Focus::Internal;
+        }
+
+        let mut footer_spans = vec![Span::raw("<Esc> exit"), Span::raw(", ")];
+        if show_external {
+            footer_spans.push(Span::raw("<Tab> switch list"));
+            footer_spans.push(Span::raw(", "));
+        }
+        footer_spans.extend([
             Span::raw("<Up> <Down> select peer"),
             Span::raw(", "),
-            Span::raw("<c> connect to peer"),
+            Span::raw("<c> connect"),
             Span::raw(", "),
-            Span::raw("<d> disconnect from peer"),
-        ])
-        .style(Style::new().fg(Color::White));
+            Span::raw("<d> disconnect"),
+        ]);
+        let footer_text = Line::from(footer_spans).style(Style::new().fg(Color::White));
 
         let block = Block::new()
             .title("Manage Connections")
@@ -146,98 +206,176 @@ impl ManageConnections {
             .border_style(Color::LightRed)
             .padding(Padding::uniform(1));
 
-        if self.node.is_none() {
-            debug!(target: "app::manage_connections", "no node selected, not rendering");
+        let inner_area = block.inner(area);
+        frame.render_widget(block, area);
+
+        let constraints: &[Constraint] = if show_external {
+            &[
+                Constraint::Percentage(20),
+                Constraint::Percentage(40),
+                Constraint::Percentage(40),
+            ]
+        } else {
+            &[Constraint::Percentage(20), Constraint::Percentage(80)]
+        };
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(inner_area);
+        let title_area = areas[0];
+        let internal_area = areas[1];
+        let external_area = if show_external { Some(areas[2]) } else { None };
+
+        let current_node_title = self
+            .node
+            .map(|peer| format!("Current Node: {peer}"))
+            .unwrap_or_else(|| "No node selected".to_string());
+
+        let title_paragraph = Paragraph::new(
+            Text::from(Line::from(current_node_title)).style(Style::new().underlined()),
+        );
+        frame.render_widget(title_paragraph, title_area);
+
+        let Some(node) = self.node else {
             return;
+        };
+
+        let connections = node_connections.get(&node);
+
+        let internal = Self::internal_peers(active_nodes, node);
+        trace!(target: "app::manage_connections", "internal peer list: {internal:#?}");
+
+        self.render_list(
+            frame,
+            internal_area,
+            "Internal Nodes",
+            &internal,
+            connections,
+            Focus::Internal,
+        );
+
+        if let Some(external_area) = external_area {
+            let external: Vec<PeerId> = external_nodes.iter().copied().collect();
+            self.render_list(
+                frame,
+                external_area,
+                "External Nodes",
+                &external,
+                connections,
+                Focus::External,
+            );
         }
+    }
 
-        let active_nodes = self.active_nodes.read();
-        let other_nodes: Vec<&PeerId> = active_nodes.iter().collect();
+    fn render_list(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        title: &str,
+        peers: &[PeerId],
+        connections: Option<&HashSet<PeerId>>,
+        kind: Focus,
+    ) {
+        let focused = self.focus == kind;
+        let border_color = if focused {
+            Color::LightCyan
+        } else {
+            Color::DarkGray
+        };
+        let block = Block::new()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(border_color);
 
-        trace!(target: "app::manage_connections", "rendering with peer list: {0:#?}", other_nodes);
-
-        if other_nodes.is_empty() {
-            Paragraph::new("--- No other peers --- ")
+        if peers.is_empty() {
+            let msg = match kind {
+                Focus::Internal => "--- No internal peers ---",
+                Focus::External => "--- No external peers ---",
+            };
+            Paragraph::new(msg)
+                .alignment(Alignment::Center)
                 .block(block)
                 .render(area, frame.buffer_mut());
-
             return;
         }
 
-        let list_items = self.format_peer_list(&other_nodes);
+        let state = match kind {
+            Focus::Internal => &mut self.internal_state,
+            Focus::External => &mut self.external_state,
+        };
 
-        let list = List::new(list_items)
-            .highlight_style(Style::new().reversed())
-            .block(block);
-
-        frame.render_stateful_widget(list, area, &mut self.list_state);
-    }
-
-    /// Format the peer list to reflect active connections to be displayed
-    fn format_peer_list(&self, peer_list: &[&PeerId]) -> Vec<String> {
-        if let Some(node) = self.node {
-            self.node_connections
-                .get(&node)
-                .map(|connections| {
-                    let connections = connections.read();
-                    peer_list
-                        .iter()
-                        .map(|p| {
-                            if **p == node {
-                                format!("(current node) -> {p}")
-                            } else if connections.contains(p) {
-                                format!("[*] {p}")
-                            } else {
-                                format!("[ ] {p}")
-                            }
-                        })
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_default()
-        } else {
-            vec![]
+        let max_idx = peers.len() - 1;
+        match state.selected() {
+            Some(sel) if sel > max_idx => state.select(Some(max_idx)),
+            None => state.select(Some(0)),
+            _ => {}
         }
+
+        let list_items = format_peer_list(peers.iter(), connections);
+        let highlight_style = if focused {
+            Style::new().reversed()
+        } else {
+            Style::new()
+        };
+        let list = List::new(list_items)
+            .highlight_style(highlight_style)
+            .block(block);
+        frame.render_stateful_widget(list, area, state);
     }
 
-    fn remove_peer_from_connections(&mut self, peer_id: &PeerId) {
-        self.node_connections
-            .iter_mut()
-            .for_each(|(_, connections)| {
-                let mut connections = connections.write();
-
-                connections.remove(peer_id);
-            });
-
-        self.node_connections.remove(peer_id);
-    }
-
-    pub fn update(&mut self, action: &Action, _actions: &mut VecDeque<Action>) {
+    pub fn update(
+        &mut self,
+        action: &Action,
+        _actions: &mut ActionQueue,
+        _active_nodes: &IndexSet<PeerId>,
+    ) {
         match action {
             Action::DisplayManageConnections { peer_id } => {
                 self.node = Some(*peer_id);
-            }
-            Action::AddNode {
-                peer_id,
-                node_connections,
-            } => {
-                self.len += 1;
-
-                self.node_connections
-                    .insert(*peer_id, node_connections.clone());
-
-                // Auto select the first node we add
-                if self.list_state.selected().is_none() {
-                    self.list_state = self.list_state.with_selected(Some(0));
+                self.focus = Focus::Internal;
+                if self.internal_state.selected().is_none() {
+                    self.internal_state.select(Some(0));
                 }
-            }
-            Action::RemoveNode { peer_id } => {
-                debug!(target: "app::manage_connections", "Removing peer {0} from peer list", peer_id);
-
-                debug!(target: "app::manage_connections", "new peer list: {0:#?}", self.active_nodes);
-                self.remove_peer_from_connections(peer_id);
-                self.len -= 1;
             }
             _ => {}
         }
     }
+}
+
+impl TuiEventHandler for ManageConnections {
+    fn on_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        actions: &mut ActionQueue,
+        ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(
+            key,
+            actions,
+            ctx.active_nodes,
+            ctx.external_nodes,
+            ctx.transport_tcp,
+        ) {
+            warn!(target: "tui::manage_connections", error = %e, "key handler error");
+        }
+        KeyResult::Handled
+    }
+
+    fn on_action(&mut self, action: &Action, actions: &mut ActionQueue, active: &IndexSet<PeerId>) {
+        self.update(action, actions, active);
+    }
+}
+
+/// Format peer entries showing connection status relative to `connections`.
+/// `[*]` = connected, `[ ]` = not connected (or unknown).
+fn format_peer_list<'a>(
+    peers: impl Iterator<Item = &'a PeerId>,
+    connections: Option<&HashSet<PeerId>>,
+) -> Vec<String> {
+    peers
+        .map(|p| match connections {
+            Some(conns) if conns.contains(p) => format!("[*] {p}"),
+            _ => format!("[ ] {p}"),
+        })
+        .collect()
 }

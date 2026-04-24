@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use parking_lot::RwLock;
 
@@ -9,6 +9,7 @@ use crate::node::{
     },
 };
 
+/// Owns a node's event log and message counters; shared with the TUI via `Arc`.
 #[derive(Default)]
 pub(crate) struct NodeLogger {
     message_history: Arc<RwLock<MessageHistory>>,
@@ -54,7 +55,7 @@ impl NodeLogger {
         message_history.add_identify_event(event, duration);
     }
 
-    pub fn all_messages(&self) -> Vec<LogMessage> {
+    pub fn all_messages(&self) -> VecDeque<LogMessage> {
         let messages = self.message_history.read();
 
         messages.all_messages()

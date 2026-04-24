@@ -1,5 +1,4 @@
 use color_eyre::eyre::Result;
-use std::collections::VecDeque;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use libp2p::PeerId;
@@ -12,8 +11,17 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::tui::{app::Action, components::popup::PopUpContent};
+use indexmap::IndexSet;
+use tracing::warn;
 
+use crate::tui::{
+    action_queue::ActionQueue,
+    app::Action,
+    components::popup::PopUpContent,
+    event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+};
+
+/// Popup sub-menu offering the identify and kademlia info views.
 #[derive(Debug)]
 pub(crate) struct NodeInfo {
     /// The node for which we are performing commands for
@@ -56,7 +64,7 @@ impl NodeInfo {
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        actions: &mut ActionQueue,
     ) -> Result<()> {
         if let Some(peer_id) = self.node {
             match key_event.code {
@@ -73,17 +81,17 @@ impl NodeInfo {
 
                     match selection {
                         0 => {
-                            actions.push_back(Action::DisplayIdentifyInfo { peer_id });
+                            actions.push(Action::DisplayIdentifyInfo { peer_id });
                         }
                         1 => {
-                            actions.push_back(Action::DisplayKademliaInfo { peer_id });
+                            actions.push(Action::DisplayKademliaInfo { peer_id });
                         }
                         _ => {}
                     }
                 }
                 // We return back to the node commands when pressing esc (exit)
                 KeyCode::Esc => {
-                    actions.push_back(Action::Popup {
+                    actions.push(Action::Popup {
                         content: PopUpContent::NodeCommands,
                         peer_id,
                     });
@@ -127,12 +135,35 @@ impl NodeInfo {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn update(&mut self, action: &Action, _actions: &mut VecDeque<Action>) {
+    pub fn update(&mut self, action: &Action, _actions: &mut ActionQueue) {
         match action {
             Action::DisplayInfo { peer_id } => {
                 self.node = Some(*peer_id);
             }
             _ => {}
         }
+    }
+}
+
+impl TuiEventHandler for NodeInfo {
+    fn on_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        actions: &mut ActionQueue,
+        _ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(key, actions) {
+            warn!(target: "tui::node_info", error = %e, "key handler error");
+        }
+        KeyResult::Handled
+    }
+
+    fn on_action(
+        &mut self,
+        action: &Action,
+        actions: &mut ActionQueue,
+        _active: &IndexSet<PeerId>,
+    ) {
+        self.update(action, actions);
     }
 }

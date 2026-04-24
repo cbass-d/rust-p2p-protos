@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use libp2p::PeerId;
@@ -12,8 +10,16 @@ use ratatui::{
 };
 use tracing::debug;
 
-use crate::tui::app::Action;
+use indexmap::IndexSet;
+use tracing::warn;
 
+use crate::tui::{
+    action_queue::ActionQueue,
+    app::Action,
+    event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+};
+
+/// Top-level popup menu for a selected node.
 #[derive(Debug)]
 pub(crate) struct NodeCommands {
     /// The node for which we are performing commands for
@@ -30,7 +36,7 @@ impl NodeCommands {
     pub fn new() -> Self {
         Self {
             node: None,
-            len: 3,
+            len: 4,
             list_state: ListState::default().with_selected(Some(0)),
         }
     }
@@ -56,7 +62,7 @@ impl NodeCommands {
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        actions: &mut ActionQueue,
     ) -> Result<()> {
         if let Some(peer_id) = self.node {
             match key_event.code {
@@ -73,19 +79,22 @@ impl NodeCommands {
 
                     match selection {
                         0 => {
-                            actions.push_back(Action::DisplayManageConnections { peer_id });
+                            actions.push(Action::DisplayManageConnections { peer_id });
                         }
                         1 => {
-                            actions.push_back(Action::DisplayInfo { peer_id });
+                            actions.push(Action::DisplayInfo { peer_id });
                         }
                         2 => {
-                            actions.push_back(Action::StopNode { peer_id });
+                            actions.push(Action::DisplayKvStore { peer_id });
+                        }
+                        3 => {
+                            actions.push(Action::StopNode { peer_id });
                         }
                         _ => {}
                     }
                 }
                 KeyCode::Esc => {
-                    actions.push_back(Action::ClosePopup);
+                    actions.push(Action::ClosePopup);
                 }
                 _ => {}
             }
@@ -116,7 +125,12 @@ impl NodeCommands {
             return;
         }
 
-        let list_items = vec!["Manage Connections", "Node Info", "Remove Node (stop node)"];
+        let list_items = vec![
+            "Manage Connections",
+            "Node Info",
+            "KV Store",
+            "Remove Node (stop node)",
+        ];
 
         let list = List::new(list_items)
             .highlight_style(Style::new().reversed())
@@ -126,5 +140,28 @@ impl NodeCommands {
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
-    pub fn update(&mut self, _action: &Action, _actions: &mut VecDeque<Action>) {}
+    pub fn update(&mut self, _action: &Action, _actions: &mut ActionQueue) {}
+}
+
+impl TuiEventHandler for NodeCommands {
+    fn on_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        actions: &mut ActionQueue,
+        _ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(key, actions) {
+            warn!(target: "tui::node_commands", error = %e, "key handler error");
+        }
+        KeyResult::Handled
+    }
+
+    fn on_action(
+        &mut self,
+        action: &Action,
+        actions: &mut ActionQueue,
+        _active: &IndexSet<PeerId>,
+    ) {
+        self.update(action, actions);
+    }
 }

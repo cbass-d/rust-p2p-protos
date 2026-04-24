@@ -1,7 +1,7 @@
 use color_eyre::eyre::Result;
 use parking_lot::RwLock;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -14,13 +14,20 @@ use ratatui::{
     style::Color,
     symbols::Marker,
     widgets::{
-        Block, Borders, ListState, ScrollbarState, Widget,
+        Block, Borders, ListState, Widget,
         canvas::{Canvas, Circle, Line},
     },
 };
 use tracing::{debug, trace};
 
-use crate::tui::{app::Action, components::node_list::Lists};
+use tracing::warn;
+
+use crate::tui::{
+    action_queue::ActionQueue,
+    app::Action,
+    components::node_list::Lists,
+    event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+};
 
 /// Radius of the circles representing the nodes
 const RADIUS: f64 = 12.0;
@@ -31,27 +38,11 @@ pub(crate) struct NodeCoords {
     y: f64,
 }
 
-/// A display for the currently active nodes
-/// Consists of a list that can be iterated through by
-/// the user
+/// Canvas showing active nodes as circles with connection lines.
 #[derive(Debug, Clone)]
 pub(crate) struct NodeBox {
-    /// Hashset containig the list of active nodes, shared by the App
-    /// and other components
-    active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-
-    /// Hashset containig the list of external nodes, shared by the App
-    /// and other components
-    external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-
     /// Which list has focus
     node_list: Lists,
-
-    /// The state of the list of internal nodes (currently selected, next, etc.)
-    internal_list_state: ListState,
-
-    /// The state of the external list of nodes (currently selected, next, etc.) pub external_list_state: ListState,
-    external_list_state: ListState,
 
     /// The length of the current list of active nodes
     len: usize,
@@ -88,13 +79,8 @@ pub(crate) struct NodeBox {
 }
 
 impl NodeBox {
-    pub fn new(
-        active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-        external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
-            active_nodes,
-            external_nodes,
             list_state: ListState::default(),
             len: 0,
             x_bound: 180.0,
@@ -105,14 +91,12 @@ impl NodeBox {
             external_node_coords: HashMap::default(),
             external_node_shapes: HashMap::default(),
             node_connections: HashMap::default(),
-            internal_list_state: ListState::default(),
-            external_list_state: ListState::default(),
             node_list: Lists::Internal,
             lines: HashMap::new(),
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, _active_nodes: &IndexSet<PeerId>) {
         let block = if self.focus {
             Block::new()
                 .title("Node Graph")
@@ -153,20 +137,20 @@ impl NodeBox {
         canvas.render(area, frame.buffer_mut());
     }
 
-    fn update_selection_in_graph(&mut self) {
-        let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
-        let active_nodes = self.active_nodes.read().clone();
-        let external_nodes = self.external_nodes.read().clone();
-        let peer = active_nodes[node_idx];
-
+    fn update_selection_in_graph(&mut self, active_nodes: &IndexSet<PeerId>) {
         // Update nodes
         self.reset_nodes();
+
+        // Update the lines
+        self.reset_lines();
+
+        let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
+        let peer = active_nodes[node_idx];
+
         if let Some(circle) = self.node_shapes.get_mut(&peer) {
             circle.color = Color::Red;
         }
 
-        // Update the lines
-        self.reset_lines();
         self.lines
             .iter_mut()
             .filter(|(p, _)| p.0 == peer || p.1 == peer)
@@ -291,7 +275,8 @@ impl NodeBox {
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        _actions: &mut VecDeque<Action>,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
     ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
@@ -299,7 +284,7 @@ impl NodeBox {
                     Lists::Internal => {
                         self.select_previous();
                         // Get the index of the newly selected node
-                        self.update_selection_in_graph();
+                        self.update_selection_in_graph(active_nodes);
                     }
                     Lists::External => {}
                 }
@@ -309,13 +294,13 @@ impl NodeBox {
                     Lists::Internal => {
                         self.select_next();
                         // Get the index of the newly selected node
-                        self.update_selection_in_graph();
+                        self.update_selection_in_graph(active_nodes);
                     }
                     Lists::External => {}
                 }
             }
             KeyCode::Char('e') => {
-                if !self.external_nodes.read().is_empty() {
+                if !external_nodes.is_empty() {
                     self.node_list = match self.node_list {
                         Lists::Internal => Lists::External,
                         Lists::External => Lists::Internal,
@@ -340,8 +325,9 @@ impl NodeBox {
     /// we must make sure it does not
     fn clamp(&mut self, idx: usize) -> usize {
         if idx >= self.len {
-            self.list_state.select(Some(self.len - 1));
-            self.len - 1
+            let idx = self.len.saturating_sub(1);
+            self.list_state.select(Some(idx));
+            idx
         } else {
             idx
         }
@@ -351,7 +337,12 @@ impl NodeBox {
         self.lines.retain(|p, _| p.0 != peer_id && p.1 != peer_id);
     }
 
-    pub fn update(&mut self, action: &Action, actions: &mut VecDeque<Action>) {
+    pub fn update(
+        &mut self,
+        action: &Action,
+        actions: &mut ActionQueue,
+        active_nodes: &IndexSet<PeerId>,
+    ) {
         match action {
             Action::AddNode {
                 peer_id,
@@ -368,15 +359,14 @@ impl NodeBox {
                 // Auto select the first node we add
                 if self.list_state.selected().is_none() {
                     self.list_state = self.list_state.with_selected(Some(0));
-                    self.update_selection_in_graph();
+                    self.update_selection_in_graph(active_nodes);
 
-                    let active_nodes = self.active_nodes.read();
-                    actions.push_back(Action::DisplayLogs {
+                    actions.push(Action::DisplayLogs {
                         peer_id: active_nodes[0],
                     });
                 }
             }
-            Action::AddExternalNode { peer_id } => {
+            Action::AddExternalNode { peer_id, .. } => {
                 debug!(target: "app::node_box", "adding new external node {}", peer_id);
 
                 let node = self.generate_node_on_canvas(peer_id, true);
@@ -397,5 +387,23 @@ impl NodeBox {
             }
             _ => {}
         }
+    }
+}
+
+impl TuiEventHandler for NodeBox {
+    fn on_key(
+        &mut self,
+        key: KeyEvent,
+        _actions: &mut ActionQueue,
+        ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(key, ctx.active_nodes, ctx.external_nodes) {
+            warn!(target: "tui::node_box", error = %e, "key handler error");
+        }
+        KeyResult::Handled
+    }
+
+    fn on_action(&mut self, action: &Action, actions: &mut ActionQueue, active: &IndexSet<PeerId>) {
+        self.update(action, actions, active);
     }
 }

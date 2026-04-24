@@ -1,5 +1,7 @@
+mod action_queue;
 pub mod app;
 mod components;
+pub(crate) mod event_handler;
 
 use std::{
     io::{Stdout, stdout},
@@ -28,6 +30,9 @@ use tracing::debug;
 
 use crate::error::AppError;
 
+pub(crate) const TICK_RATE: f64 = 4.0;
+pub(crate) const FRAME_RATE: f64 = 60.0;
+
 /// Events originating from the user interacting with the TUI
 /// as well as tick and render events
 pub(crate) enum TuiEvent {
@@ -55,10 +60,7 @@ pub(crate) struct Tui {
 
 impl Tui {
     pub fn new() -> Result<Self, AppError> {
-        let tick_rate = 4.0;
-        let frame_rate = 60.0;
-        let terminal = Terminal::new(CrosstermBackend::new(stdout()))
-            .map_err(|e| AppError::TuiInit(e.to_string()))?;
+        let terminal = Terminal::new(CrosstermBackend::new(stdout())).map_err(AppError::TuiInit)?;
         let (tui_event_tx, tui_event_rx) = mpsc::unbounded_channel();
         let cancellation_token = CancellationToken::new();
         let task = tokio::spawn(async {});
@@ -71,8 +73,8 @@ impl Tui {
             cancellation_token,
             tui_event_rx,
             tui_event_tx,
-            frame_rate,
-            tick_rate,
+            frame_rate: FRAME_RATE,
+            tick_rate: TICK_RATE,
         })
     }
 
@@ -158,23 +160,19 @@ impl Tui {
         });
     }
 
-    pub fn stop(&self) -> Result<(), AppError> {
+    pub async fn stop(&mut self) -> Result<(), AppError> {
         self.cancel();
-        let mut counter = 0;
-
-        // Make sure the task is fully finished
-        while !self.task.is_finished() {
-            std::thread::sleep(Duration::from_millis(1));
-            counter += 1;
-            if counter > 50 {
+        match tokio::time::timeout(Duration::from_millis(100), &mut self.task).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) if e.is_cancelled() => Ok(()),
+            Ok(Err(e)) => Err(AppError::OtherTUI(std::io::Error::other(format!(
+                "TUI task panicked: {e}"
+            )))),
+            Err(_) => {
                 self.task.abort();
-            }
-            if counter > 100 {
-                break;
+                Ok(())
             }
         }
-
-        Ok(())
     }
 
     pub fn cancel(&self) {
@@ -182,9 +180,9 @@ impl Tui {
     }
 
     pub fn enter(&mut self) -> Result<(), AppError> {
-        crossterm::terminal::enable_raw_mode().map_err(|e| AppError::TuiInit(e.to_string()))?;
+        crossterm::terminal::enable_raw_mode().map_err(AppError::TuiInit)?;
         crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)
-            .map_err(|e| AppError::TuiInit(e.to_string()))?;
+            .map_err(AppError::TuiInit)?;
         self.start();
         Ok(())
     }
@@ -193,17 +191,14 @@ impl Tui {
         self.tui_event_rx.recv().await
     }
 
-    pub fn exit(&mut self) -> Result<(), AppError> {
-        self.stop()?;
+    pub async fn exit(&mut self) -> Result<(), AppError> {
+        self.stop().await?;
 
         // Clean up the terminal environment
-        if crossterm::terminal::is_raw_mode_enabled()
-            .map_err(|e| AppError::OtherTUI(e.to_string()))?
-        {
+        if crossterm::terminal::is_raw_mode_enabled().map_err(AppError::OtherTUI)? {
             crossterm::execute!(stdout(), LeaveAlternateScreen, cursor::Show)
-                .map_err(|e| AppError::OtherTUI(e.to_string()))?;
-            crossterm::terminal::disable_raw_mode()
-                .map_err(|e| AppError::OtherTUI(e.to_string()))?;
+                .map_err(AppError::OtherTUI)?;
+            crossterm::terminal::disable_raw_mode().map_err(AppError::OtherTUI)?;
         }
 
         Ok(())

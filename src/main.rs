@@ -1,6 +1,7 @@
 #![warn(clippy::pedantic)]
 #![deny(clippy::unwrap_used)]
 
+mod bus;
 mod cli;
 mod error;
 mod messages;
@@ -11,17 +12,20 @@ mod tui;
 mod util;
 
 use clap::Parser;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Context, Result};
 use network::TransportMode;
 use tracing::{error, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{self, EnvFilter, Layer, layer::SubscriberExt};
 
-use crate::{cli::CliArgs, error::AppError, simulation::Simulation};
+use crate::{
+    cli::CliArgs,
+    error::AppError,
+    simulation::Simulation,
+    tui::{FRAME_RATE, TICK_RATE},
+};
 
 const MAX_NODES: u8 = 10;
-const TICK_RATE: f64 = 4.0;
-const FRAME_RATE: f64 = 60.0;
 
 /// Initialize tracing for application, uses a rolling log file that refreshes daily
 fn init_tracing() -> Result<WorkerGuard, AppError> {
@@ -51,7 +55,7 @@ fn init_tracing() -> Result<WorkerGuard, AppError> {
 async fn main() -> Result<()> {
     color_eyre::install().expect("failed to setup color_eyre");
 
-    let _guard = init_tracing()?;
+    let _guard = init_tracing().wrap_err("failed to initialize tracing")?;
 
     let args = CliArgs::parse();
     let starting_nodes = args.nodes;
@@ -81,9 +85,13 @@ async fn main() -> Result<()> {
         .frame_rate(FRAME_RATE)
         .transport(mode)
         .bind_address(bind_address)
-        .build()?;
+        .build()
+        .wrap_err("failed to build simulation")?;
 
-    simulation.run().await?;
+    simulation
+        .run()
+        .await
+        .wrap_err("failed to run simulation")?;
 
     info!("node network shutdown");
 

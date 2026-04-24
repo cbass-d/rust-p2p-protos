@@ -1,5 +1,7 @@
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
+use indexmap::IndexSet;
+use libp2p::PeerId;
 use parking_lot::RwLock;
 use ratatui::{
     Frame,
@@ -10,13 +12,20 @@ use ratatui::{
         ScrollbarState, Widget,
     },
 };
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
+
+use tracing::warn;
 
 use crate::{
     node::{NodeStats, history::MessageHistory},
-    tui::app::Action,
+    tui::{
+        action_queue::ActionQueue,
+        app::Action,
+        event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+    },
 };
 
+/// Scrollable log panel for the selected node.
 #[derive(Debug, Clone)]
 pub(crate) struct NodeLog {
     selected: Option<(Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
@@ -42,12 +51,12 @@ impl NodeLog {
         self.focus = focus;
     }
 
-    pub fn update(&mut self, _action: &Action, _actions: &mut VecDeque<Action>) {}
+    pub fn update(&mut self, _action: &Action, _actions: &mut ActionQueue) {}
 
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        _actions: &mut VecDeque<Action>,
+        _actions: &mut ActionQueue,
     ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
@@ -85,7 +94,7 @@ impl NodeLog {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, _active_nodes: &IndexSet<PeerId>) {
         if self.selected.is_none() {
             let block = if self.focus {
                 Block::new()
@@ -158,5 +167,28 @@ impl NodeLog {
         message_and_stats: (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>),
     ) {
         self.selected = Some(message_and_stats);
+    }
+}
+
+impl TuiEventHandler for NodeLog {
+    fn on_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        actions: &mut ActionQueue,
+        _ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(key, actions) {
+            warn!(target: "tui::node_log", error = %e, "key handler error");
+        }
+        KeyResult::Handled
+    }
+
+    fn on_action(
+        &mut self,
+        action: &Action,
+        actions: &mut ActionQueue,
+        _active: &IndexSet<PeerId>,
+    ) {
+        self.update(action, actions);
     }
 }

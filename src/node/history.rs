@@ -1,5 +1,7 @@
 use core::fmt;
+use std::collections::VecDeque;
 use std::time::Duration;
+use tracing::trace;
 
 use libp2p::{
     Multiaddr, PeerId,
@@ -12,12 +14,16 @@ use ratatui::{
     text::{Line, Span},
 };
 
+#[derive(Debug, Clone)]
 pub(crate) enum LogMessage {
     Swarm { event: SwarmEventInfo, at: f32 },
     Kad { event: KadEventInfo, at: f32 },
     Identify { event: IdentifyEventInfo, at: f32 },
     Mdns { event: MdnsEventInfo, at: f32 },
 }
+
+const MAX_SIZE: usize = 250;
+const ALL_MAX_SIZE: usize = 1000;
 
 /// Wrappers for libp2p Swarm events for easier handling and formatting
 #[derive(Debug, Clone)]
@@ -90,10 +96,11 @@ pub(crate) enum MdnsEventInfo {
 /// Container for the swarm events a node has seen separated by protocol. Includes a timestamp
 #[derive(Default, Debug, Clone)]
 pub(crate) struct MessageHistory {
-    pub identify: Vec<(IdentifyEventInfo, f32)>,
-    pub kademlia: Vec<(KadEventInfo, f32)>,
-    pub mdns: Vec<(MdnsEventInfo, f32)>,
-    pub swarm: Vec<(SwarmEventInfo, f32)>,
+    pub identify: VecDeque<(IdentifyEventInfo, f32)>,
+    pub kademlia: VecDeque<(KadEventInfo, f32)>,
+    pub mdns: VecDeque<(MdnsEventInfo, f32)>,
+    pub swarm: VecDeque<(SwarmEventInfo, f32)>,
+    pub all: VecDeque<LogMessage>,
 }
 
 fn format_duration(duration: Duration) -> f32 {
@@ -101,28 +108,65 @@ fn format_duration(duration: Duration) -> f32 {
 }
 
 impl MessageHistory {
+    /// Adds a log message to all
+    pub fn add_to_all(&mut self, message: LogMessage) {
+        if self.all.len() >= ALL_MAX_SIZE {
+            self.all.pop_front();
+        }
+        self.all.push_back(message);
+    }
+
     /// Adds a identify event, takes the event as String and the timestamp as f32
     pub fn add_identify_event(&mut self, event: IdentifyEventInfo, since_start: Duration) {
         let since_start = format_duration(since_start);
-        self.identify.push((event, since_start));
+        if self.identify.len() >= MAX_SIZE {
+            self.identify.pop_front();
+        }
+
+        self.identify.push_back((event.clone(), since_start));
+        self.add_to_all(LogMessage::Identify {
+            event,
+            at: since_start,
+        });
     }
 
     /// Adds a mdns event, takes the event as String and the timestamp as f32
     pub fn add_mdns_event(&mut self, event: MdnsEventInfo, since_start: Duration) {
         let since_start = format_duration(since_start);
-        self.mdns.push((event, since_start));
+        if self.mdns.len() >= MAX_SIZE {
+            self.mdns.pop_front();
+        }
+        self.mdns.push_back((event.clone(), since_start));
+        self.add_to_all(LogMessage::Mdns {
+            event,
+            at: since_start,
+        });
     }
 
     /// Adds a kademlia event, takes the event as String and the timestamp as f32
     pub fn add_kademlia_event(&mut self, event: KadEventInfo, since_start: Duration) {
         let since_start = format_duration(since_start);
-        self.kademlia.push((event, since_start));
+        if self.kademlia.len() >= MAX_SIZE {
+            self.kademlia.pop_front();
+        }
+        self.kademlia.push_back((event.clone(), since_start));
+        self.add_to_all(LogMessage::Kad {
+            event,
+            at: since_start,
+        });
     }
 
     /// Adds a swarm event, takes the event as String and the timestamp as f32
     pub fn add_swarm_event(&mut self, event: SwarmEventInfo, since_start: Duration) {
         let since_start = format_duration(since_start);
-        self.swarm.push((event, since_start));
+        if self.swarm.len() >= MAX_SIZE {
+            self.swarm.pop_front();
+        }
+        self.swarm.push_back((event.clone(), since_start));
+        self.add_to_all(LogMessage::Swarm {
+            event,
+            at: since_start,
+        });
     }
 
     pub(crate) fn format_kad_message(&self, event: &KadEventInfo, time: f32) -> Line<'_> {
@@ -246,32 +290,8 @@ impl MessageHistory {
 
     /// Returns all messages as pretty and formatted ratatui Lines
     pub fn all_messages_formatted(&self) -> Vec<Line<'_>> {
-        let mut messages = vec![];
-        messages.append(&mut self.kad_messages());
-        messages.append(&mut self.identify_messages());
-        messages.append(&mut self.swarm_messages());
-        messages.append(&mut self.mdns_messages());
-
-        messages.sort_by(|a, b| {
-            let a_time = match a {
-                LogMessage::Swarm { at, .. }
-                | LogMessage::Kad { at, .. }
-                | LogMessage::Mdns { at, .. }
-                | LogMessage::Identify { at, .. } => at,
-            };
-            let b_time = match b {
-                LogMessage::Swarm { at, .. }
-                | LogMessage::Kad { at, .. }
-                | LogMessage::Mdns { at, .. }
-                | LogMessage::Identify { at, .. } => at,
-            };
-
-            a_time
-                .partial_cmp(b_time)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        messages
+        trace!(target: "simulation::node::history", "all messages len: {}", self.all.len());
+        self.all
             .iter()
             .map(|m| match m {
                 LogMessage::Kad { event, at } => self.format_kad_message(event, *at),
@@ -283,13 +303,8 @@ impl MessageHistory {
     }
 
     /// Returns all messages as strings
-    pub fn all_messages(&self) -> Vec<LogMessage> {
-        let mut messages = vec![];
-        messages.append(&mut self.identify_messages());
-        messages.append(&mut self.kad_messages());
-        messages.append(&mut self.swarm_messages());
-
-        messages
+    pub fn all_messages(&self) -> VecDeque<LogMessage> {
+        self.all.clone()
     }
 }
 

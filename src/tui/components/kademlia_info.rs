@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use libp2p::PeerId;
@@ -11,9 +9,16 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Padding, Paragraph, Widget, Wrap},
 };
 
+use tracing::warn;
+
 use crate::{
     node::info::KademliaInfo as NodeKademliaInfo,
-    tui::{app::Action, components::popup::PopUpContent},
+    tui::{
+        action_queue::ActionQueue,
+        app::Action,
+        components::popup::PopUpContent,
+        event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+    },
 };
 
 /// Component for displaying info related to the identify protocol
@@ -49,12 +54,12 @@ impl KademliaInfo {
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        actions: &mut ActionQueue,
     ) -> Result<()> {
         if let Some(peer_id) = self.node
             && key_event.code == KeyCode::Esc
         {
-            actions.push_back(Action::Popup {
+            actions.push(Action::Popup {
                 content: PopUpContent::NodeInfo,
                 peer_id,
             });
@@ -125,5 +130,29 @@ impl KademliaInfo {
                 .alignment(Alignment::Center)
                 .render(area, frame.buffer_mut());
         }
+    }
+}
+
+impl TuiEventHandler for KademliaInfo {
+    fn on_network_event(
+        &mut self,
+        event: &crate::messages::NetworkEvent,
+        _actions: &mut ActionQueue,
+    ) {
+        if let crate::messages::NetworkEvent::KademliaInfo { info } = event {
+            self.set_info(info.clone());
+        }
+    }
+
+    fn on_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        actions: &mut ActionQueue,
+        _ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(key, actions) {
+            warn!(target: "tui::kademlia_info", error = %e, "key handler error");
+        }
+        KeyResult::Handled
     }
 }

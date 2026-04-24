@@ -13,7 +13,7 @@ use crate::node::info::{IdentifyInfo, KademliaInfo};
 pub(crate) type CommandChannel = (NodeCommand, oneshot::Sender<NodeResponse>);
 
 /// Event emitted by the Node Network
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum NetworkEvent {
     /// A new node has started running
     NodeRunning {
@@ -22,6 +22,9 @@ pub(crate) enum NetworkEvent {
         stats: Arc<RwLock<NodeStats>>,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
     },
+
+    /// A node has bound a real listen address (emitted per `NewListenAddr`)
+    NodeListening { peer_id: PeerId, address: Multiaddr },
 
     /// A node in the network has stopped
     NodeStopped { peer_id: PeerId },
@@ -48,26 +51,57 @@ pub(crate) enum NetworkEvent {
     MaxNodes,
 }
 
-/// A network command sent from the TUI to the Node Network
+/// A network command sent from the TUI to the Node Network, grouped by protocol.
 #[derive(Debug)]
 pub(crate) enum NetworkCommand {
-    /// Start a new node in the network
-    StartNode,
+    Swarm(SwarmCommand),
+    Identify(IdentifyCommand),
+    Kademlia(KademliaCommand),
+    Lifecycle(LifecycleCommand),
+}
 
-    /// Stop a node from running
-    StopNode { peer_id: PeerId },
+/// Commands that act on the libp2p swarm connection graph.
+#[derive(Debug)]
+pub(crate) enum SwarmCommand {
+    /// Create a connection between two nodes, `peer_one` dials `peer_two`.
+    Connect { peer_one: PeerId, peer_two: PeerId },
 
-    /// Create a connection between two nodes
-    ConnectNodes { peer_one: PeerId, peer_two: PeerId },
+    /// Remove the connection between two nodes.
+    Disconnect { peer_one: PeerId, peer_two: PeerId },
+}
 
-    /// Remove the connection between two nodes
-    DisconnectNodes { peer_one: PeerId, peer_two: PeerId },
+/// Commands that interact with the Identify protocol.
+#[derive(Debug)]
+pub(crate) enum IdentifyCommand {
+    /// Get the local identify info for the requested node.
+    GetInfo { peer_id: PeerId },
+}
 
-    /// Get the local identify info for the requested node
-    GetIdentifyInfo { peer_id: PeerId },
+/// Commands that interact with the Kademlia protocol.
+#[derive(Debug)]
+pub(crate) enum KademliaCommand {
+    /// Get the kademlia info for the requested node.
+    GetInfo { peer_id: PeerId },
 
-    /// Get the kademlia info for the requested node
-    GetKademliaInfo { peer_id: PeerId },
+    /// Put a new KAD record on the selected peer.
+    PutRecord {
+        peer_id: PeerId,
+        key: String,
+        value: String,
+    },
+}
+
+/// Commands that manage network-wide node lifecycle.
+#[derive(Debug)]
+pub(crate) enum LifecycleCommand {
+    /// Start a new node in the network.
+    Start,
+
+    /// Stop a node from running.
+    Stop { peer_id: PeerId },
+
+    /// Add a new external node that was discovered outside the simulation.
+    AddExternal { peer_id: PeerId, address: Multiaddr },
 }
 
 /// A command sent to a node from the node network
@@ -84,6 +118,9 @@ pub(crate) enum NodeCommand {
 
     /// Return the kademlia info
     GetKademliaInfo,
+
+    /// Put a new KAD record on the node
+    PutRecord { key: String, value: String },
 
     /// Stop the node from running
     Stop,
@@ -103,6 +140,9 @@ pub(crate) enum NodeResponse {
 
     /// Connected to peer
     Dialed { addr: Multiaddr },
+
+    /// Record placed
+    RecordPlaced,
 
     /// Node stopped
     Stopped,

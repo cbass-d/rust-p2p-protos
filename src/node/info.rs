@@ -37,7 +37,7 @@ pub(crate) struct KBucketInfo {
     pub num_entries: usize,
 }
 
-/// Local identify info for a node
+/// Local kademlia info for a node.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct KademliaInfo {
     pub mode: Mode,
@@ -47,7 +47,7 @@ pub(crate) struct KademliaInfo {
 }
 
 impl KademliaInfo {
-    /// Build a new structure holding a node's local identify info
+    /// Build a new structure holding a node's local kademlia info
     pub fn new(mode: Mode, bootstrapped: bool) -> Self {
         Self {
             mode,

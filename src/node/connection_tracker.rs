@@ -42,18 +42,17 @@ impl ConnectionTracker {
         current_peers.contains(peer_id)
     }
 
-    pub(crate) fn known(&self) -> HashSet<Multiaddr> {
-        debug!(target: "simulation::node::connection_tracker", "creating copy of node known peers");
-        self.known_peers.clone()
+    pub(crate) fn known(&self) -> &HashSet<Multiaddr> {
+        &self.known_peers
     }
 
-    pub(crate) fn add_active_peer(&mut self, peer_id: PeerId) {
+    pub(crate) fn add_active_peer(&self, peer_id: PeerId) {
         debug!(target: "simulation::node::connection_tracker", "adding new peer {} to node connections", peer_id);
         let mut current_peers = self.current_peers.write();
         current_peers.insert(peer_id);
     }
 
-    pub(crate) fn remove_active_peer(&mut self, peer_id: &PeerId) {
+    pub(crate) fn remove_active_peer(&self, peer_id: &PeerId) {
         debug!(target: "simulation::node::connection_tracker", "removing peer {} from node connections", peer_id);
         let mut current_peers = self.current_peers.write();
         current_peers.remove(peer_id);

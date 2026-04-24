@@ -1,5 +1,6 @@
 pub(crate) mod identify_info;
 pub(crate) mod kademlia_info;
+pub(crate) mod kv_store;
 pub(crate) mod manage_connections;
 pub(crate) mod node_box;
 pub(crate) mod node_commands;

@@ -1,10 +1,6 @@
 use color_eyre::eyre::Result;
 use indexmap::IndexSet;
-use parking_lot::RwLock;
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
+use std::collections::HashMap;
 use tracing::debug;
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -16,7 +12,14 @@ use ratatui::{
     widgets::{Block, Borders, List, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
-use crate::tui::{app::Action, components::popup::PopUpContent};
+use tracing::warn;
+
+use crate::tui::{
+    action_queue::ActionQueue,
+    app::Action,
+    components::popup::PopUpContent,
+    event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Lists {
@@ -24,19 +27,9 @@ pub(crate) enum Lists {
     External,
 }
 
-/// A display for the currently active nodes
-/// Consists of a list that can be iterated through by
-/// the user
+/// Scrollable list of the currently active nodes.
 #[derive(Debug, Clone)]
 pub(crate) struct NodeList {
-    /// Hashset containig the list of active nodes, shared by the App
-    /// and other components
-    active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-
-    /// Hashset containig the list of external nodes, shared by the App
-    /// and other components
-    external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-
     /// The length of the current list of active nodes
     len: usize,
 
@@ -58,13 +51,8 @@ pub(crate) struct NodeList {
 }
 
 impl NodeList {
-    pub fn new(
-        active_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-        external_nodes: Arc<RwLock<IndexSet<PeerId>>>,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
-            active_nodes,
-            external_nodes,
             internal_list_state: ListState::default(),
             external_list_state: ListState::default(),
             len: 0,
@@ -79,18 +67,26 @@ impl NodeList {
         self.focus = focus;
     }
 
-    fn clap_scrollbar_pos(&self, new_pos: usize) -> usize {
+    fn clap_scrollbar_pos(
+        &self,
+        new_pos: usize,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
+    ) -> usize {
         let len = match self.node_list {
-            Lists::Internal => self.active_nodes.read().len(),
-            Lists::External => self.external_nodes.read().len(),
+            Lists::Internal => active_nodes.len(),
+            Lists::External => external_nodes.len(),
         };
         if new_pos > len { len } else { new_pos }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let external_nodes = self.external_nodes.read();
-        let active_nodes = self.active_nodes.read();
-
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
+    ) {
         let (internal_area, external_area) = if external_nodes.is_empty() {
             (area, None)
         } else {
@@ -151,7 +147,7 @@ impl NodeList {
             .end_symbol(None);
         self.internal_scrollbar_state = self
             .internal_scrollbar_state
-            .content_length(self.active_nodes.read().len());
+            .content_length(active_nodes.len());
         self.internal_scrollbar_state = self
             .internal_scrollbar_state
             .viewport_content_length(internal_area.height as usize);
@@ -196,7 +192,7 @@ impl NodeList {
                 .end_symbol(None);
             self.external_scrollbar_state = self
                 .external_scrollbar_state
-                .content_length(self.external_nodes.read().len());
+                .content_length(external_nodes.len());
             self.external_scrollbar_state = self
                 .external_scrollbar_state
                 .viewport_content_length(external_area.height as usize);
@@ -220,7 +216,9 @@ impl NodeList {
     pub fn handle_key_event(
         &mut self,
         key_event: KeyEvent,
-        actions: &mut VecDeque<Action>,
+        actions: &mut ActionQueue,
+        active_nodes: &IndexSet<PeerId>,
+        external_nodes: &IndexSet<PeerId>,
     ) -> Result<()> {
         match key_event.code {
             KeyCode::Up => {
@@ -238,6 +236,8 @@ impl NodeList {
                             self.external_scrollbar_state
                                 .position(self.clap_scrollbar_pos(
                                     self.external_scrollbar_state.get_position() + 1,
+                                    active_nodes,
+                                    external_nodes,
                                 ));
                     }
                     Lists::Internal => {
@@ -245,9 +245,10 @@ impl NodeList {
                             self.internal_scrollbar_state
                                 .position(self.clap_scrollbar_pos(
                                     self.internal_scrollbar_state.get_position() + 1,
+                                    active_nodes,
+                                    external_nodes,
                                 ));
-                        let active_nodes = self.active_nodes.read();
-                        actions.push_back(Action::DisplayLogs {
+                        actions.push(Action::DisplayLogs {
                             peer_id: active_nodes[node_idx],
                         });
                     }
@@ -269,6 +270,8 @@ impl NodeList {
                             self.external_scrollbar_state
                                 .position(self.clap_scrollbar_pos(
                                     self.external_scrollbar_state.get_position() + 1,
+                                    active_nodes,
+                                    external_nodes,
                                 ));
                     }
                     Lists::Internal => {
@@ -276,19 +279,23 @@ impl NodeList {
                             self.internal_scrollbar_state
                                 .position(self.clap_scrollbar_pos(
                                     self.internal_scrollbar_state.get_position() + 1,
+                                    active_nodes,
+                                    external_nodes,
                                 ));
-                        let active_nodes = self.active_nodes.read();
-                        actions.push_back(Action::DisplayLogs {
+                        actions.push(Action::DisplayLogs {
                             peer_id: active_nodes[node_idx],
                         });
                     }
                 }
             }
-            KeyCode::Char('a') => {
-                actions.push_back(Action::StartNode);
-            }
+            KeyCode::Char('a') => match self.node_list {
+                Lists::Internal => {
+                    actions.push(Action::StartNode);
+                }
+                Lists::External => {}
+            },
             KeyCode::Char('e') => {
-                if !self.external_nodes.read().is_empty() {
+                if !external_nodes.is_empty() {
                     self.node_list = match self.node_list {
                         Lists::Internal => Lists::External,
                         Lists::External => Lists::Internal,
@@ -300,8 +307,7 @@ impl NodeList {
                     Lists::Internal => self.clamp(self.internal_list_state.selected().unwrap_or(0)),
                     Lists::External => self.clamp(self.external_list_state.selected().unwrap_or(0)),
                 };
-                let active_nodes = self.active_nodes.read();
-                actions.push_back(Action::Popup {
+                actions.push(Action::Popup {
                     content: PopUpContent::NodeCommands,
                     peer_id: active_nodes[node_idx],
                 });
@@ -332,7 +338,12 @@ impl NodeList {
         if idx >= self.len { self.len - 1 } else { idx }
     }
 
-    pub fn update(&mut self, action: &Action, actions: &mut VecDeque<Action>) {
+    pub fn update(
+        &mut self,
+        action: &Action,
+        actions: &mut ActionQueue,
+        active_nodes: &IndexSet<PeerId>,
+    ) {
         match action {
             Action::AddNode { .. } => {
                 self.len += 1;
@@ -342,8 +353,7 @@ impl NodeList {
 
                     debug!(target: "app::node_list", "display log action added");
 
-                    let active_nodes = self.active_nodes.read();
-                    actions.push_back(Action::DisplayLogs {
+                    actions.push(Action::DisplayLogs {
                         peer_id: active_nodes[0],
                     });
 
@@ -355,5 +365,23 @@ impl NodeList {
             }
             _ => {}
         }
+    }
+}
+
+impl TuiEventHandler for NodeList {
+    fn on_key(
+        &mut self,
+        key: KeyEvent,
+        actions: &mut ActionQueue,
+        ctx: &TuiKeyCtx<'_>,
+    ) -> KeyResult {
+        if let Err(e) = self.handle_key_event(key, actions, ctx.active_nodes, ctx.external_nodes) {
+            warn!(target: "tui::node_list", error = %e, "key handler error");
+        }
+        KeyResult::Handled
+    }
+
+    fn on_action(&mut self, action: &Action, actions: &mut ActionQueue, active: &IndexSet<PeerId>) {
+        self.update(action, actions, active);
     }
 }

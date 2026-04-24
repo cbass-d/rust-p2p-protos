@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    bus::EventBus,
     messages::{CommandChannel, NetworkEvent},
     network::TransportMode,
     node::{
@@ -27,6 +28,10 @@ use crate::{
         base::NodeBase,
         behaviour::NodeBehaviour,
         connection_tracker::ConnectionTracker,
+        handlers::{
+            CoreSwarmHandler, IdentifyEventHandler, KadEventHandler, MdnsEventHandler,
+            SwarmEventHandler,
+        },
         info::{IdentifyInfo, KademliaInfo},
         kad_handler::KadQueries,
         logger::NodeLogger,
@@ -34,6 +39,8 @@ use crate::{
         state::State,
     },
 };
+
+const NODE_COMMAND_CHANNEL_SIZE: usize = 100;
 
 /// A node with libp2p swarm configured
 pub(crate) struct ConfiguredNode {
@@ -46,22 +53,23 @@ pub(crate) struct ConfiguredNode {
     /// `CancellationToken` that shared network
     cancellation_token: CancellationToken,
 
-    /// mpsc sender for Network Events
-    network_event_tx: mpsc::Sender<NetworkEvent>,
+    /// Broadcast bus for Network Events (cloned from the NodeNetwork's bus).
+    network_event_tx: EventBus<NetworkEvent>,
 
     /// mpsc channel for receiving commands to perform from the network
     from_network: mpsc::Receiver<CommandChannel>,
 }
 
 impl ConfiguredNode {
+    /// Build a fully-wired node and the sender used to issue commands to it.
     pub fn new(
         cancellation_token: CancellationToken,
-        network_event_tx: mpsc::Sender<NetworkEvent>,
+        network_event_tx: EventBus<NetworkEvent>,
         transport: TransportMode,
         bind_address: Option<Ipv4Addr>,
     ) -> Result<(Self, mpsc::Sender<CommandChannel>), NodeError> {
         // Build the mpsc channel where the node will be receiving commands from
-        let (tx, rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(NODE_COMMAND_CHANNEL_SIZE);
 
         let node_keys = identity::Keypair::generate_ed25519();
         let peer_id = node_keys.public().to_peer_id();
@@ -85,10 +93,15 @@ impl ConfiguredNode {
         let listen_address = match transport {
             TransportMode::Memory => Multiaddr::from(Protocol::Memory(rand::random::<u64>())),
             TransportMode::Tcp => {
-                let bind_address = bind_address.unwrap();
-                format!("/ip4/{bind_address}/tcp/0")
+                let bind_address = bind_address.ok_or(NodeError::Config(
+                    "bind address required for tcp mode".into(),
+                ))?;
+
+                let listen_addr = format!("/ip4/{bind_address}/tcp/0")
                     .parse()
-                    .expect("invalid tcp listen address")
+                    .map_err(|e| NodeError::Config(format!("invalid listen address: {e}")))?;
+
+                listen_addr
             }
         };
 
@@ -137,6 +150,7 @@ impl ConfiguredNode {
             kad_info,
             listen_address,
             bind_address,
+            transport,
         );
 
         let node = ConfiguredNode {
@@ -154,6 +168,17 @@ impl ConfiguredNode {
     pub fn start(self) -> RunningNode {
         let mut connection_tracker = ConnectionTracker::default();
         connection_tracker.set_known(self.known_peers);
+
+        // Canonical handler order: the core swarm-lifecycle handler runs first
+        // (fast-path for Dialing / Connection* / Listener* events); the three
+        // behaviour handlers are disjoint, so their relative order is cosmetic.
+        let handlers: Vec<Box<dyn SwarmEventHandler>> = vec![
+            Box::new(CoreSwarmHandler),
+            Box::new(IdentifyEventHandler),
+            Box::new(KadEventHandler),
+            Box::new(MdnsEventHandler),
+        ];
+
         RunningNode {
             base: self.base,
             logger: NodeLogger::default(),
@@ -162,6 +187,7 @@ impl ConfiguredNode {
             state: State::new(Instant::now(), self.cancellation_token),
             from_network: self.from_network,
             network_event_tx: self.network_event_tx,
+            handlers,
         }
     }
 }

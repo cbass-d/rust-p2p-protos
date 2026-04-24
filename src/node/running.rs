@@ -1,21 +1,19 @@
-use std::time::Instant;
-
-use color_eyre::eyre::Result;
-use libp2p::{core::ConnectedPoint, swarm::SwarmEvent};
+use libp2p::{Multiaddr, swarm::SwarmEvent};
 use tokio::sync::mpsc;
 
 use crate::{
+    bus::EventBus,
     messages::{CommandChannel, NetworkEvent, NodeCommand, NodeResponse},
     node::{
         NodeError, NodeResult,
         base::NodeBase,
         behaviour::NodeNetworkEvent,
         connection_tracker::ConnectionTracker,
-        history::SwarmEventInfo,
-        identify_handler,
-        kad_handler::{self, KadQueries},
+        handlers::{
+            ConnectionOp, Effects, HandlerCtx, KadOp, LogKind, StateMutation, SwarmEventHandler,
+        },
+        kad_handler::KadQueries,
         logger::NodeLogger,
-        mdns_handler,
         state::State,
     },
 };
@@ -35,14 +33,18 @@ pub(crate) struct RunningNode {
     /// mpsc channel for receiving commands to perform from the network
     pub(crate) from_network: mpsc::Receiver<CommandChannel>,
 
-    /// mpsc sender for Network Events
-    pub(crate) network_event_tx: mpsc::Sender<NetworkEvent>,
+    /// Broadcast bus for Network Events (shared across all nodes).
+    pub(crate) network_event_tx: EventBus<NetworkEvent>,
 
     /// Handler for logging of events
     pub(crate) logger: NodeLogger,
 
     /// Important kad queries that we must keep track of
     pub(crate) kad_queries: KadQueries,
+
+    /// Ordered list of per-protocol swarm event handlers. First handler
+    /// returning `Ok(true)` claims the event; the rest are skipped.
+    pub(crate) handlers: Vec<Box<dyn SwarmEventHandler>>,
 }
 
 impl RunningNode {
@@ -55,18 +57,16 @@ impl RunningNode {
         );
 
         // Send out event that the node is now running
-        if let Err(e) = self
-            .network_event_tx
-            .send(NetworkEvent::NodeRunning {
-                peer_id: self.base.peer_id,
-                message_history: self.logger.history(),
-                stats: self.logger.stats(),
-                node_connections: self.connection_tracker.connections(),
-            })
-            .await
-        {
-            warn!(target: "simulation::node", error = %e, "failed to send node running event");
-        }
+        let running_event = NetworkEvent::NodeRunning {
+            peer_id: self.base.peer_id,
+            message_history: self.logger.history(),
+            stats: self.logger.stats(),
+            node_connections: self.connection_tracker.connections(),
+        };
+        self.apply_effects(Effects {
+            published: vec![running_event],
+            ..Default::default()
+        });
 
         self.base.listen()?;
 
@@ -100,15 +100,12 @@ impl RunningNode {
         info!(target: "simulation::node", peer_id = %self.base.peer_id, "node now shutting down");
 
         // Send out event that the node has stopped running
-        if let Err(e) = self
-            .network_event_tx
-            .send(NetworkEvent::NodeStopped {
+        self.apply_effects(Effects {
+            published: vec![NetworkEvent::NodeStopped {
                 peer_id: self.base.peer_id,
-            })
-            .await
-        {
-            warn!(target: "simulation::node", error = %e, "failed to send node stopped event");
-        }
+            }],
+            ..Default::default()
+        });
 
         if self.state.killed() {
             Ok(NodeResult::Killed)
@@ -121,7 +118,7 @@ impl RunningNode {
     fn dial_known_peers(&mut self) {
         info!(target: "simulation::node", "dialing known peers");
         let mut dialed = 0;
-        for addr in &self.connection_tracker.known() {
+        for addr in self.connection_tracker.known() {
             if self.base.dial(addr.clone()).is_ok() {
                 debug!(target: "simulation::node", addr = %addr, "successfully dialed peer");
                 dialed += 1;
@@ -142,166 +139,118 @@ impl RunningNode {
         }
     }
 
+    /// Walk each handler until one claims the event, then apply the effects.
     async fn handle_swarm_event(&mut self, event: SwarmEvent<NodeNetworkEvent>) {
-        let start = self.state.start();
-
         self.logger.increment_recvd();
-        match event {
-            SwarmEvent::Dialing { peer_id, .. } => {
-                debug!(target: "simulation::node", ?peer_id, "dialing peer");
 
-                self.logger.add_swarm_event(
-                    SwarmEventInfo::Dialing { peer_id },
-                    Instant::now().duration_since(start),
-                );
-            }
-            SwarmEvent::IncomingConnection { send_back_addr, .. } => {
-                debug!(target: "simulation::node", addr = %send_back_addr, "incoming connection");
+        let ctx = HandlerCtx {
+            self_peer_id: self.base.peer_id,
+            bind_address: self.base.bind_address,
+            start_instant: self.state.start(),
+            bootstrapped: self.state.bootstrapped(),
+            kad_queries: &self.kad_queries,
+            connections: &self.connection_tracker,
+        };
 
-                self.logger.add_swarm_event(
-                    SwarmEventInfo::IncomingConnection {
-                        address: send_back_addr,
-                    },
-                    Instant::now().duration_since(start),
-                );
-            }
-            SwarmEvent::NewListenAddr {
-                listener_id,
-                address,
-                ..
-            } => {
-                self.logger.add_swarm_event(
-                    SwarmEventInfo::NewListenAddr {
-                        listener_id,
-                        address,
-                    },
-                    Instant::now().duration_since(start),
-                );
-            }
-            SwarmEvent::ConnectionEstablished {
-                peer_id, endpoint, ..
-            } => {
-                info!(target: "simulation::node", %peer_id, ?endpoint, "connection established");
-
-                let peer_addr = match endpoint.clone() {
-                    ConnectedPoint::Dialer { address, .. } => address,
-                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
-                };
-                self.base.kad_add_address(&peer_id, peer_addr);
-
-                self.connection_tracker.add_active_peer(peer_id);
-
-                debug!(target: "simulation::node", peer_count = self.connection_tracker.connection_count(), "peer count updated");
-
-                self.logger.add_swarm_event(
-                    SwarmEventInfo::ConnectionEstablished { peer_id },
-                    Instant::now().duration_since(start),
-                );
-
-                // Send event of node connections
-                if let Err(e) = self
-                    .network_event_tx
-                    .send(NetworkEvent::NodesConnected {
-                        peer_one: peer_id,
-                        peer_two: self.base.peer_id,
-                    })
-                    .await
-                {
-                    warn!(target: "simulation::node", error = %e, "failed to send nodes connected event");
+        let mut effects = Effects::default();
+        let mut claimed = false;
+        for handler in &self.handlers {
+            match handler.handle(&event, &ctx, &mut effects) {
+                Ok(true) => {
+                    claimed = true;
+                    break;
                 }
+                Ok(false) => continue,
+                Err(e) => warn!(target: "simulation::node", error = %e, "handler error"),
+            }
+        }
+        if !claimed {
+            trace!("unhandled swarm event: {:?}", event);
+        }
 
-                if !self.state.bootstrapped() {
-                    debug!(target: "simulation::node::kademlia_events", "attempting kademlia bootstrapping");
-                    if let Ok(qid) = self.base.kad_bootstrap() {
+        self.apply_effects(effects);
+    }
+
+    /// The single imperative shell for swarm-driven side effects.
+    fn apply_effects(&mut self, effects: Effects) {
+        for (kind, dur) in effects.log_entries {
+            match kind {
+                LogKind::Swarm(info) => self.logger.add_swarm_event(info, dur),
+                LogKind::Identify(info) => self.logger.add_identify_event(info, dur),
+                LogKind::Kademlia(info) => self.logger.add_kademlia_event(info, dur),
+                LogKind::Mdns(info) => self.logger.add_mdns_event(info, dur),
+            }
+        }
+
+        for addr in effects.dials {
+            if let Err(e) = self.base.dial(addr.clone()) {
+                warn!(target: "simulation::node", %addr, error = %e, "dial failed");
+            }
+        }
+
+        for op in effects.kad_ops {
+            match op {
+                KadOp::AddAddress { peer, addr } => {
+                    self.base.kad_add_address(&peer, addr);
+                }
+                KadOp::RemovePeer { peer } => {
+                    self.base.kad_remove_peer(&peer);
+                }
+                KadOp::Bootstrap => match self.base.kad_bootstrap() {
+                    Ok(qid) => {
                         debug!(target: "simulation::node::kademlia_events", "kademlia bootstrap started");
                         self.kad_queries.bootstrap = Some(qid);
-                    } else {
-                        warn!(target: "simulation::node::kademlia_events", "initial kademlia bootstrap failed");
                     }
-                }
-            }
-            SwarmEvent::ConnectionClosed {
-                peer_id,
-                endpoint,
-                cause,
-                ..
-            } => {
-                info!(target: "simulation::node", %peer_id, ?endpoint, ?cause, "connection closed");
-
-                self.logger.add_swarm_event(
-                    SwarmEventInfo::ConnectionClosed { peer_id },
-                    Instant::now().duration_since(start),
-                );
-
-                // Send event of nodes disconnecting
-                if let Err(e) = self
-                    .network_event_tx
-                    .send(NetworkEvent::NodesDisconnected {
-                        peer_one: peer_id,
-                        peer_two: self.base.peer_id,
-                    })
-                    .await
-                {
-                    warn!(target: "simulation::node", error = %e, "failed to send nodes disconnected event");
-                }
-
-                debug!(target: "simulation::node", peer_count = self.connection_tracker.connection_count(), "peer count updated");
-
-                self.connection_tracker.remove_active_peer(&peer_id);
-            }
-            SwarmEvent::ListenerClosed {
-                listener_id,
-                addresses,
-                ..
-            } => {
-                debug!(target: "simulation::node", "listener now closed");
-
-                self.logger.add_swarm_event(
-                    SwarmEventInfo::ListenerClosed {
-                        listener_id,
-                        addresses,
-                    },
-                    Instant::now().duration_since(start),
-                );
-            }
-            SwarmEvent::IncomingConnectionError { peer_id, error, .. } => {
-                error!(target: "simulation::node", ?peer_id, %error, "incoming connection failed");
-            }
-            SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                error!(target: "simulation::node", ?peer_id, %error, "outgoing connection failed");
-            }
-            SwarmEvent::Behaviour(NodeNetworkEvent::Identify(event)) => {
-                debug!(target: "simulation::node", "new identify event been added");
-
-                if let Err(e) = identify_handler::handle_event(self, event) {
-                    warn!(target: "simulation::node", error = %e, "failed to handle identify event");
-                }
-            }
-            SwarmEvent::Behaviour(NodeNetworkEvent::Kademlia(event)) => {
-                debug!(target: "simulation::node", "new kademlia event been added");
-
-                if let Err(e) = kad_handler::handle_event(self, event) {
-                    warn!(target: "simulation::node", error = %e, "failed to handle kad event");
-                }
-            }
-            SwarmEvent::Behaviour(NodeNetworkEvent::Mdns(event)) => {
-                debug!(target: "simulation::node", "new mdns event been added");
-
-                match mdns_handler::handle_event(self, event) {
                     Err(e) => {
-                        warn!(target: "simulation::node", error = %e, "failed to handle mdns event");
+                        warn!(target: "simulation::node::kademlia_events", error = %e, "kademlia bootstrap failed");
                     }
-                    Ok(Some(network_event)) => {
-                        // Send out event that the node is now running
-                        if let Err(e) = self.network_event_tx.send(network_event).await {
-                            warn!(target: "simulation::node", error = %e, "failed to send mdns network event");
-                        }
-                    }
-                    _ => {}
+                },
+                KadOp::GetProviders { key } => {
+                    let qid = self.base.kad_get_providers(key);
+                    self.kad_queries.get_providers = Some(qid);
+                }
+                KadOp::GetClosestPeers { peer } => {
+                    self.base.kad_get_closest_peers(peer);
+                }
+                KadOp::SetMode(mode) => self.base.kad_info.set_mode(mode),
+                KadOp::SetBootstrapped(b) => self.base.kad_info.set_bootstrapped(b),
+            }
+        }
+
+        for op in effects.connection_ops {
+            match op {
+                ConnectionOp::AddActive { peer } => self.connection_tracker.add_active_peer(peer),
+                ConnectionOp::RemoveActive { peer } => {
+                    self.connection_tracker.remove_active_peer(&peer);
                 }
             }
-            other => {
-                trace!("unhandled swarm event: {:?}", other);
+        }
+        debug!(target: "simulation::node", peer_count = self.connection_tracker.connection_count(), "peer count");
+
+        for mutation in effects.state_mutations {
+            match mutation {
+                StateMutation::MarkBootstrapped => self.state.bootstrap(),
+                StateMutation::ClearBootstrapQuery => self.kad_queries.bootstrap = None,
+                StateMutation::ClearGetProvidersQuery => self.kad_queries.get_providers = None,
+                StateMutation::ClearProvidingAgentQuery => self.kad_queries.providing_agent = None,
+            }
+        }
+
+        for event in effects.published {
+            self.network_event_tx.publish(event);
+        }
+    }
+
+    /// Dial a peer; transport is dispatched by the swarm based on the multiaddr.
+    fn connect_to_peer(&mut self, peer: Multiaddr) -> NodeResponse {
+        match self.base.dial(peer.clone()) {
+            Ok(()) => {
+                debug!(target: "simulation::node", addr = %peer, "successfully dialed peer");
+                NodeResponse::Dialed { addr: peer }
+            }
+            Err(e) => {
+                warn!(target: "simulation::node", addr = %peer, error = %e, "failed to dial peer");
+                NodeResponse::Failed
             }
         }
     }
@@ -311,18 +260,7 @@ impl RunningNode {
         match command {
             NodeCommand::ConnectTo { peer } => {
                 debug!(target: "simulation::node", addr = %peer, "connect to command received");
-                match self.base.dial(peer.clone()) {
-                    Ok(()) => {
-                        debug!(target: "simulation::node", addr = %peer, "successfully dialed peer");
-
-                        NodeResponse::Dialed { addr: peer }
-                    }
-                    Err(e) => {
-                        warn!(target: "simulation::node", addr = %peer, error = %e, "failed to dial peer");
-
-                        NodeResponse::Failed
-                    }
-                }
+                self.connect_to_peer(peer)
             }
             NodeCommand::DisconnectFrom { peer } => {
                 debug!(target: "simulation::node", %peer, "disconnect from command received");
@@ -346,6 +284,11 @@ impl RunningNode {
                 let info = self.base.kad_info.clone();
 
                 NodeResponse::KademliaInfo { info }
+            }
+            NodeCommand::PutRecord { key, value } => {
+                debug!(target: "simulation::node", "put record command received: {key} - {value}");
+
+                NodeResponse::RecordPlaced
             }
             NodeCommand::Stop => {
                 debug!(target: "simulation::node", "stop command received");
