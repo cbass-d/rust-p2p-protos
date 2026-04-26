@@ -1,5 +1,5 @@
 use color_eyre::eyre::Result;
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, kad::Mode};
 use std::{collections::HashMap, net::Ipv4Addr};
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
@@ -104,7 +104,7 @@ impl NodeNetwork {
 
     /// Builds and adds a new node into the network. Returns a Node or an Err when building the
     /// new node fails
-    pub fn add_node(&mut self) -> Result<ConfiguredNode> {
+    pub fn add_node(&mut self, kad_mode: Mode) -> Result<ConfiguredNode> {
         // Every node will be able to send network events and will have
         // a cancellation token to know when to stop
         let network_event_tx = self.network_event_tx.clone();
@@ -115,6 +115,7 @@ impl NodeNetwork {
             network_event_tx,
             self.transport,
             self.bind_address,
+            kad_mode,
         )?;
         let listen_address = node.base.listen_address.clone();
         let peer_id = node.base.peer_id;
@@ -202,7 +203,7 @@ impl NodeNetwork {
     ) {
         for _ in 0..self.starting_nodes {
             // Build the new node
-            let node = match self.add_node() {
+            let node = match self.add_node(Mode::Server) {
                 Ok(node) => node,
                 Err(e) => {
                     warn!(target: "simulation::network", error = %e, "failed to build node");

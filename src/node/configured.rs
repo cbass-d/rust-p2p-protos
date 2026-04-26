@@ -65,6 +65,7 @@ impl ConfiguredNode {
         network_event_tx: EventBus<NetworkEvent>,
         transport: TransportMode,
         bind_address: Option<Ipv4Addr>,
+        kad_mode: Mode,
     ) -> Result<(Self, mpsc::Sender<CommandChannel>), NodeError> {
         // Build the mpsc channel where the node will be receiving commands from
         let (tx, rx) = mpsc::channel(NODE_COMMAND_CHANNEL_SIZE);
@@ -105,7 +106,7 @@ impl ConfiguredNode {
 
         let store = MemoryStore::new(peer_id);
         let mut kad = Kademlia::new(peer_id, store);
-        kad.set_mode(Some(Mode::Server));
+        kad.set_mode(Some(kad_mode));
         let mdns = match transport {
             TransportMode::Tcp => Toggle::from(Some(
                 Mdns::new(MdnsConfig::default(), peer_id)
@@ -150,6 +151,7 @@ impl ConfiguredNode {
             listen_address,
             bind_address,
             transport,
+            kad_mode,
         );
 
         let node = ConfiguredNode {

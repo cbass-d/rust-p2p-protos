@@ -6,7 +6,7 @@ use libp2p::{
     Multiaddr, PeerId, Swarm,
     core::transport::ListenerId,
     kad::{
-        KBucketKey, QueryId, Quorum, Record, RecordKey, RoutingUpdate,
+        KBucketKey, Mode, QueryId, Quorum, Record, RecordKey, RoutingUpdate,
         store::{Error, RecordStore},
     },
     swarm::SwarmEvent,
@@ -31,6 +31,9 @@ pub(crate) struct NodeBase {
     /// - identify
     /// - kademlia
     swarm: Swarm<NodeBehaviour>,
+
+    /// The KAD mode the node is operating under (Client/Server)
+    pub(crate) kad_mode: Mode,
 
     /// Struct to hold local identify info (info that is pushed to other peers)
     pub(crate) identify_info: IdentifyInfo,
@@ -58,6 +61,7 @@ impl NodeBase {
         listen_address: Multiaddr,
         bind_address: Option<Ipv4Addr>,
         transport_mode: TransportMode,
+        kad_mode: Mode,
     ) -> Self {
         Self {
             peer_id,
@@ -67,6 +71,7 @@ impl NodeBase {
             listen_address,
             bind_address,
             transport_mode,
+            kad_mode,
         }
     }
 

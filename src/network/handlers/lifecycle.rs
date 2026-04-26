@@ -15,7 +15,7 @@ pub(crate) async fn handle(
     task_set: &mut JoinSet<Result<NodeResult, NodeError>>,
 ) {
     match cmd {
-        LifecycleCommand::Start => {
+        LifecycleCommand::Start { kad_mode } => {
             if ctx.nodes.len() >= ctx.max_nodes as usize {
                 ctx.network_event_tx.publish(NetworkEvent::MaxNodes);
                 return;
@@ -26,6 +26,7 @@ pub(crate) async fn handle(
                 ctx.network_event_tx.clone(),
                 ctx.transport,
                 ctx.bind_address,
+                kad_mode,
             ) {
                 Ok((node, tx)) => {
                     let peer_id = node.base.peer_id;

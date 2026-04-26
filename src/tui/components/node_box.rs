@@ -7,7 +7,7 @@ use std::{
 
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
-use libp2p::PeerId;
+use libp2p::{PeerId, kad::Mode};
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
@@ -15,7 +15,7 @@ use ratatui::{
     symbols::Marker,
     widgets::{
         Block, Borders, ListState, Widget,
-        canvas::{Canvas, Circle, Line},
+        canvas::{Canvas, Circle, Line, Painter, Rectangle, Shape},
     },
 };
 use tracing::{debug, trace};
@@ -29,8 +29,72 @@ use crate::tui::{
     event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
 };
 
-/// Radius of the circles representing the nodes
+/// Radius of the circles representing the client nodes
 const RADIUS: f64 = 12.0;
+
+// Width of the rectangle reprsenting the server nodes
+const WIDTH: f64 = 18.0;
+
+// Height of the rectangle reprsenting the server nodes
+const HEIGHT: f64 = 18.0;
+
+/// Enum wrapper for node shape drawn on the canvas
+#[derive(Debug, Clone)]
+enum NodeShape {
+    Client(Circle),
+    Server(Rectangle),
+}
+
+impl NodeShape {
+    fn set_color(&mut self, color: Color) {
+        match self {
+            NodeShape::Client(circle) => circle.color = color,
+            NodeShape::Server(rectangle) => rectangle.color = color,
+        }
+    }
+
+    fn center(&self) -> (f64, f64) {
+        match self {
+            NodeShape::Client(c) => (c.x, c.y),
+            NodeShape::Server(r) => (r.x + r.width / 2.0, r.y + r.height / 2.0),
+        }
+    }
+
+    /// Returns the point on the shape's border along the ray from its center
+    /// toward `target`. Used to draw connection lines that end on the edge
+    /// of the shape rather than the center.
+    fn border_point_toward(&self, target: (f64, f64)) -> (f64, f64) {
+        let (cx, cy) = self.center();
+        let dx = target.0 - cx;
+        let dy = target.1 - cy;
+        let dist = (dx * dx + dy * dy).sqrt();
+        if dist == 0.0 {
+            return (cx, cy);
+        }
+        let nx = dx / dist;
+        let ny = dy / dist;
+
+        match self {
+            NodeShape::Client(c) => (cx + nx * c.radius, cy + ny * c.radius),
+            NodeShape::Server(r) => {
+                let hw = r.width / 2.0;
+                let hh = r.height / 2.0;
+                let tx = if nx.abs() > f64::EPSILON {
+                    hw / nx.abs()
+                } else {
+                    f64::INFINITY
+                };
+                let ty = if ny.abs() > f64::EPSILON {
+                    hh / ny.abs()
+                } else {
+                    f64::INFINITY
+                };
+                let t = tx.min(ty);
+                (cx + nx * t, cy + ny * t)
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct NodeCoords {
@@ -65,14 +129,14 @@ pub(crate) struct NodeBox {
     /// Cordinataes for each of the nodes
     node_coords: HashMap<PeerId, NodeCoords>,
 
-    /// ratatui Circles for each of the nodes
-    node_shapes: HashMap<PeerId, Circle>,
+    /// ratatui Circles for each of the client nodes
+    nodes_shapes: HashMap<PeerId, NodeShape>,
 
     /// Cordinataes for each of the external nodes
     external_node_coords: HashMap<PeerId, NodeCoords>,
 
     /// ratatui Circles for each of the external nodes
-    external_node_shapes: HashMap<PeerId, Circle>,
+    external_node_shapes: HashMap<PeerId, NodeShape>,
 
     /// The lines connecting each of the nodes/circles
     lines: HashMap<(PeerId, PeerId), Line>,
@@ -87,9 +151,9 @@ impl NodeBox {
             y_bound: 90.0,
             focus: false,
             node_coords: HashMap::default(),
-            node_shapes: HashMap::default(),
-            external_node_coords: HashMap::default(),
+            nodes_shapes: HashMap::default(),
             external_node_shapes: HashMap::default(),
+            external_node_coords: HashMap::default(),
             node_connections: HashMap::default(),
             node_list: Lists::Internal,
             lines: HashMap::new(),
@@ -110,7 +174,7 @@ impl NodeBox {
                 .borders(Borders::ALL)
         };
 
-        let nodes = &self.node_shapes;
+        let nodes = &self.nodes_shapes;
         let external_nodes = &self.external_node_shapes;
         let connections = &self.lines;
 
@@ -147,8 +211,8 @@ impl NodeBox {
         let node_idx = self.clamp(self.list_state.selected().unwrap_or(0));
         let peer = active_nodes[node_idx];
 
-        if let Some(circle) = self.node_shapes.get_mut(&peer) {
-            circle.color = Color::Red;
+        if let Some(shape) = self.nodes_shapes.get_mut(&peer) {
+            shape.set_color(Color::Red);
         }
 
         self.lines
@@ -160,15 +224,13 @@ impl NodeBox {
     }
 
     fn reset_nodes(&mut self) {
-        self.node_shapes.iter_mut().for_each(|(_, circle)| {
-            circle.color = Color::White;
+        self.nodes_shapes.iter_mut().for_each(|(_, shape)| {
+            shape.set_color(Color::White);
         });
 
-        self.external_node_shapes
-            .iter_mut()
-            .for_each(|(_, circle)| {
-                circle.color = Color::Blue;
-            });
+        self.external_node_shapes.iter_mut().for_each(|(_, shape)| {
+            shape.set_color(Color::Blue);
+        });
     }
 
     fn reset_lines(&mut self) {
@@ -181,7 +243,12 @@ impl NodeBox {
         self.focus = focus;
     }
 
-    fn generate_node_on_canvas(&mut self, peer: &PeerId, is_external: bool) -> Circle {
+    fn generate_node_on_canvas(
+        &mut self,
+        peer: &PeerId,
+        is_external: bool,
+        mode: &Mode,
+    ) -> NodeShape {
         let min_distance = 50.0;
         loop {
             let x = rand::random_range(-self.x_bound + 15.0..=self.x_bound - 15.0);
@@ -194,24 +261,51 @@ impl NodeBox {
             });
 
             if valid {
-                if is_external {
-                    self.external_node_coords
-                        .insert(peer.to_owned(), NodeCoords { x, y });
-                    return Circle {
-                        x,
-                        y,
-                        radius: RADIUS,
-                        color: Color::Blue,
-                    };
-                } else {
-                    self.node_coords
-                        .insert(peer.to_owned(), NodeCoords { x, y });
-                    return Circle {
-                        x,
-                        y,
-                        radius: RADIUS,
-                        color: Color::White,
-                    };
+                match mode {
+                    Mode::Client => {
+                        if is_external {
+                            self.external_node_coords
+                                .insert(peer.to_owned(), NodeCoords { x, y });
+                            return NodeShape::Client(Circle {
+                                x,
+                                y,
+                                radius: RADIUS,
+                                color: Color::Blue,
+                            });
+                        } else {
+                            self.node_coords
+                                .insert(peer.to_owned(), NodeCoords { x, y });
+                            return NodeShape::Client(Circle {
+                                x,
+                                y,
+                                radius: RADIUS,
+                                color: Color::White,
+                            });
+                        }
+                    }
+                    Mode::Server => {
+                        if is_external {
+                            self.external_node_coords
+                                .insert(peer.to_owned(), NodeCoords { x, y });
+                            return NodeShape::Server(Rectangle {
+                                x: x - WIDTH / 2.0,
+                                y: y - HEIGHT / 2.0,
+                                width: WIDTH,
+                                height: HEIGHT,
+                                color: Color::Blue,
+                            });
+                        } else {
+                            self.node_coords
+                                .insert(peer.to_owned(), NodeCoords { x, y });
+                            return NodeShape::Server(Rectangle {
+                                x: x - WIDTH / 2.0,
+                                y: y - HEIGHT / 2.0,
+                                width: WIDTH,
+                                height: HEIGHT,
+                                color: Color::White,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -229,36 +323,27 @@ impl NodeBox {
     }
 
     fn connect_two_nodes(&mut self, peer_one: PeerId, peer_two: PeerId) {
-        let circle_one = self
-            .node_shapes
+        let shape_one = self
+            .nodes_shapes
             .get(&peer_one)
             .or_else(|| self.external_node_shapes.get(&peer_one));
-        let circle_two = self
-            .node_shapes
+        let shape_two = self
+            .nodes_shapes
             .get(&peer_two)
             .or_else(|| self.external_node_shapes.get(&peer_two));
 
         debug!(target: "app::node_box", "attempting to connect {peer_one} and {peer_two}");
 
-        if let Some(circle_one) = circle_one
-            && let Some(circle_two) = circle_two
+        if let Some(shape_one) = shape_one
+            && let Some(shape_two) = shape_two
         {
             debug!(target: "app::node_box", "two nodes being connected on graph {peer_one} {peer_two}");
 
-            // Draw the line endpoints on the border of the circle
-            // rather than the center
-            let dx = circle_two.x - circle_one.x;
-            let dy = circle_two.y - circle_one.y;
-            let distance = (dx * dx + dy * dy).sqrt();
+            let center_one = shape_one.center();
+            let center_two = shape_two.center();
 
-            let nx = dx / distance;
-            let ny = dy / distance;
-
-            let x1 = circle_one.x + nx * RADIUS;
-            let y1 = circle_one.y + ny * RADIUS;
-
-            let x2 = circle_two.x - nx * RADIUS;
-            let y2 = circle_two.y - ny * RADIUS;
+            let (x1, y1) = shape_one.border_point_toward(center_two);
+            let (x2, y2) = shape_two.border_point_toward(center_one);
 
             let line = Line {
                 x1,
@@ -347,12 +432,13 @@ impl NodeBox {
             Action::AddNode {
                 peer_id,
                 node_connections,
+                mode,
             } => {
                 debug!(target: "app::node_box", "adding new node {} with connections {:?}", peer_id, node_connections);
 
                 self.len += 1;
-                let node = self.generate_node_on_canvas(peer_id, false);
-                self.node_shapes.insert(*peer_id, node);
+                let node = self.generate_node_on_canvas(peer_id, false, mode);
+                self.nodes_shapes.insert(*peer_id, node);
                 self.node_connections
                     .insert(*peer_id, node_connections.clone());
 
@@ -369,14 +455,15 @@ impl NodeBox {
             Action::AddExternalNode { peer_id, .. } => {
                 debug!(target: "app::node_box", "adding new external node {}", peer_id);
 
-                let node = self.generate_node_on_canvas(peer_id, true);
+                let mode = &Mode::Server;
+                let node = self.generate_node_on_canvas(peer_id, true, mode);
                 self.external_node_shapes.insert(*peer_id, node);
             }
             Action::RemoveNode { peer_id } => {
                 self.len -= 1;
 
                 self.node_coords.remove(peer_id);
-                self.node_shapes.remove(peer_id);
+                self.nodes_shapes.remove(peer_id);
                 self.remove_line(*peer_id);
             }
             Action::UpdateConnections { peer_one, peer_two } => {
@@ -405,5 +492,14 @@ impl TuiEventHandler for NodeBox {
 
     fn on_action(&mut self, action: &Action, actions: &mut ActionQueue, active: &IndexSet<PeerId>) {
         self.update(action, actions, active);
+    }
+}
+
+impl Shape for NodeShape {
+    fn draw(&self, painter: &mut Painter) {
+        match self {
+            NodeShape::Client(circle) => circle.draw(painter),
+            NodeShape::Server(rectangle) => rectangle.draw(painter),
+        }
     }
 }

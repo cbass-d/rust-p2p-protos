@@ -6,7 +6,7 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, kad::Mode};
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent, KeyEventKind},
@@ -53,12 +53,13 @@ pub(crate) enum Action {
     Quit,
 
     /// Start a new node in the network
-    StartNode,
+    StartNode { kad_mode: Mode },
 
     /// Add a newly started node to the TUI
     AddNode {
         peer_id: PeerId,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
+        mode: Mode,
     },
 
     /// Add an external node to the TUI
@@ -457,10 +458,12 @@ impl App {
                 self.focus_list_graph();
                 self.actions.push(Action::ClosePopup);
             }
-            Action::StartNode => {
+            Action::StartNode { kad_mode } => {
                 if let Err(e) = self
                     .network_command_tx
-                    .send(NetworkCommand::Lifecycle(LifecycleCommand::Start))
+                    .send(NetworkCommand::Lifecycle(LifecycleCommand::Start {
+                        kad_mode,
+                    }))
                     .await
                 {
                     warn!(target: "app", "failed to send network command: {e}");
@@ -533,6 +536,7 @@ impl App {
                 message_history,
                 stats,
                 node_connections,
+                mode,
             } => {
                 debug!(target: "TUI", "network event received: node running");
                 self.node_logs
@@ -542,6 +546,7 @@ impl App {
                 self.actions.push(Action::AddNode {
                     peer_id: *peer_id,
                     node_connections: node_connections.clone(),
+                    mode: *mode,
                 });
             }
             NetworkEvent::NodeStopped { peer_id } => {

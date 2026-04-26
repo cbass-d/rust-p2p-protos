@@ -62,7 +62,9 @@ impl RunningNode {
             message_history: self.logger.history(),
             stats: self.logger.stats(),
             node_connections: self.connection_tracker.connections(),
+            mode: self.base.kad_mode,
         };
+
         self.apply_effects(Effects {
             published: vec![running_event],
             ..Default::default()

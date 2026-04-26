@@ -1,3 +1,4 @@
+use libp2p::kad::Mode;
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub(crate) enum NetworkEvent {
         message_history: Arc<RwLock<MessageHistory>>,
         stats: Arc<RwLock<NodeStats>>,
         node_connections: Arc<RwLock<HashSet<PeerId>>>,
+        mode: Mode,
     },
 
     /// A node has bound a real listen address (emitted per `NewListenAddr`)
@@ -101,7 +103,7 @@ pub(crate) enum KademliaCommand {
 #[derive(Debug)]
 pub(crate) enum LifecycleCommand {
     /// Start a new node in the network.
-    Start,
+    Start { kad_mode: Mode },
 
     /// Stop a node from running.
     Stop { peer_id: PeerId },

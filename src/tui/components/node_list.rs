@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use tracing::debug;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use libp2p::PeerId;
+use libp2p::{PeerId, kad::Mode};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
@@ -124,9 +124,10 @@ impl NodeList {
         });
 
         if active_nodes.len() < 10 && !external_nodes.is_empty() {
-            block = block.title_bottom("<a> Add to add node <e> Switch to external");
+            block = block
+                .title_bottom("<s> Add server node <c> Add client node <e> Switch to external");
         } else if active_nodes.len() < 10 && external_nodes.is_empty() {
-            block = block.title_bottom("<a> Add to add node");
+            block = block.title_bottom("<s> Add server node <c> Add client node");
         } else {
             block = block.title_bottom("MAX NODES");
         }
@@ -288,9 +289,19 @@ impl NodeList {
                     }
                 }
             }
-            KeyCode::Char('a') => match self.node_list {
+            KeyCode::Char('s') => match self.node_list {
                 Lists::Internal => {
-                    actions.push(Action::StartNode);
+                    actions.push(Action::StartNode {
+                        kad_mode: Mode::Server,
+                    });
+                }
+                Lists::External => {}
+            },
+            KeyCode::Char('c') => match self.node_list {
+                Lists::Internal => {
+                    actions.push(Action::StartNode {
+                        kad_mode: Mode::Client,
+                    });
                 }
                 Lists::External => {}
             },
