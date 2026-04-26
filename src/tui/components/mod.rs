@@ -8,3 +8,4 @@ pub(crate) mod node_info;
 pub(crate) mod node_list;
 pub(crate) mod node_log;
 pub(crate) mod popup;
+pub(crate) mod records_list;

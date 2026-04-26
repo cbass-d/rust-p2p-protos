@@ -97,6 +97,9 @@ pub(crate) enum Action {
     /// Display the kv store popup for the selected node
     DisplayKvStore { peer_id: PeerId },
 
+    /// Display the records list for local sotred KAD records
+    DisplayRecordsList { peer_id: PeerId },
+
     /// Put reccord on the selected peer
     PutRecord {
         peer_id: PeerId,
@@ -354,6 +357,22 @@ impl App {
 
                 self.unfocus_list_graph();
             }
+            Action::DisplayRecordsList { peer_id } => {
+                debug!(target: "app", "displaying records list for node {peer_id}");
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkCommand::Kademlia(KademliaCommand::RecordsList {
+                        peer_id,
+                    }))
+                    .await
+                {
+                    warn!(target: "app", "failed to send network command: {e}");
+                }
+
+                debug!(target: "app", %peer_id, "tui sent RecordsList network command");
+
+                self.unfocus_list_graph();
+            }
             Action::DisplayKvStore { peer_id } => {
                 debug!(target: "app", "displaying kv store popup for node {peer_id}");
 
@@ -387,6 +406,25 @@ impl App {
                 {
                     warn!(target: "app", "failed to send network command: {e}");
                 }
+            }
+            Action::PutRecord {
+                peer_id,
+                ref key,
+                ref value,
+            } => {
+                if let Err(e) = self
+                    .network_command_tx
+                    .send(NetworkCommand::Kademlia(KademliaCommand::PutRecord {
+                        peer_id,
+                        key: key.clone(),
+                        value: value.clone(),
+                    }))
+                    .await
+                {
+                    warn!(target: "app", "failed to send network command: {e}");
+                }
+
+                debug!(target: "app", %peer_id, "tui sent PutRecord network command");
             }
             Action::DisconnectFrom { peer_one, peer_two } => {
                 if let Err(e) = self
@@ -551,9 +589,9 @@ impl App {
             | NetworkEvent::NodeExpired { .. }
             | NetworkEvent::MaxNodes => {}
 
-            // IdentifyInfo / KademliaInfo reach their components via
-            // dispatch_network_event — see the component impls.
-            NetworkEvent::IdentifyInfo { .. } | NetworkEvent::KademliaInfo { .. } => {}
+            NetworkEvent::IdentifyInfo { .. }
+            | NetworkEvent::KademliaInfo { .. }
+            | NetworkEvent::RecordsList { .. } => {}
         }
     }
 

@@ -12,6 +12,7 @@ use ratatui::{
 use tracing::warn;
 
 use crate::{
+    messages::NetworkEvent,
     node::info::KademliaInfo as NodeKademliaInfo,
     tui::{
         action_queue::ActionQueue,
@@ -139,7 +140,7 @@ impl TuiEventHandler for KademliaInfo {
         event: &crate::messages::NetworkEvent,
         _actions: &mut ActionQueue,
     ) {
-        if let crate::messages::NetworkEvent::KademliaInfo { info } = event {
+        if let NetworkEvent::KademliaInfo { info } = event {
             self.set_info(info.clone());
         }
     }

@@ -36,7 +36,7 @@ impl NodeCommands {
     pub fn new() -> Self {
         Self {
             node: None,
-            len: 4,
+            len: 5,
             list_state: ListState::default().with_selected(Some(0)),
         }
     }
@@ -88,6 +88,9 @@ impl NodeCommands {
                             actions.push(Action::DisplayKvStore { peer_id });
                         }
                         3 => {
+                            actions.push(Action::DisplayRecordsList { peer_id });
+                        }
+                        4 => {
                             actions.push(Action::StopNode { peer_id });
                         }
                         _ => {}
@@ -129,6 +132,7 @@ impl NodeCommands {
             "Manage Connections",
             "Node Info",
             "KV Store",
+            "KAD Records List",
             "Remove Node (stop node)",
         ];
 

@@ -16,7 +16,6 @@ use crate::{
         behaviour::NodeNetworkEvent,
         connection_tracker::ConnectionTracker,
         history::{IdentifyEventInfo, KadEventInfo, MdnsEventInfo, SwarmEventInfo},
-        kad_handler::KadQueries,
     },
 };
 
@@ -27,7 +26,7 @@ mod mdns;
 
 pub(crate) use core::CoreSwarmHandler;
 pub(crate) use identify::IdentifyEventHandler;
-pub(crate) use kademlia::KadEventHandler;
+pub(crate) use kademlia::{KadEventHandler, KadQueries};
 pub(crate) use mdns::MdnsEventHandler;
 
 /// Turns a swarm event into effects. `Ok(true)` claims the event,

@@ -15,24 +15,100 @@ use crate::tui::{
     event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
 };
 
-/// Popup for entering a key to store via Kademlia `PutRecord`.
+/// A single text-input field with its own cursor.
+#[derive(Debug, Default)]
+struct Field {
+    buf: String,
+
+    /// Byte index of the cursor into `buf`.
+    cursor: usize,
+}
+
+impl Field {
+    fn insert_char(&mut self, c: char) {
+        self.buf.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
+    }
+
+    fn delete_char(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let before = self.buf[..self.cursor]
+            .chars()
+            .next_back()
+            .map(char::len_utf8)
+            .unwrap_or(0);
+        let new_pos = self.cursor - before;
+        self.buf.remove(new_pos);
+        self.cursor = new_pos;
+    }
+
+    fn move_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let before = self.buf[..self.cursor]
+            .chars()
+            .next_back()
+            .map(char::len_utf8)
+            .unwrap_or(0);
+        self.cursor -= before;
+    }
+
+    fn move_right(&mut self) {
+        if self.cursor >= self.buf.len() {
+            return;
+        }
+        let after = self.buf[self.cursor..]
+            .chars()
+            .next()
+            .map(char::len_utf8)
+            .unwrap_or(0);
+        self.cursor += after;
+    }
+
+    /// Column position of the cursor, in characters (for `set_cursor_position`).
+    fn cursor_col(&self) -> u16 {
+        self.buf[..self.cursor].chars().count() as u16
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KvFocus {
+    Key,
+    Value,
+}
+
+impl KvFocus {
+    fn toggle(self) -> Self {
+        match self {
+            KvFocus::Key => KvFocus::Value,
+            KvFocus::Value => KvFocus::Key,
+        }
+    }
+}
+
+/// Popup for entering a key/value pair to store via Kademlia `PutRecord`.
 #[derive(Debug)]
 pub(crate) struct KvStore {
     /// The node for which we are performing commands for
     node: Option<PeerId>,
 
-    key_input: String,
+    key: Field,
+    value: Field,
 
-    /// Byte index of the cursor into `key_input`
-    cursor_pos: usize,
+    /// Which field currently receives input.
+    focus: KvFocus,
 }
 
 impl KvStore {
     pub(crate) fn new() -> Self {
         Self {
             node: None,
-            key_input: String::default(),
-            cursor_pos: 0,
+            key: Field::default(),
+            value: Field::default(),
+            focus: KvFocus::Key,
         }
     }
 
@@ -41,47 +117,11 @@ impl KvStore {
         self.node = Some(node);
     }
 
-    fn insert_char(&mut self, c: char) {
-        self.key_input.insert(self.cursor_pos, c);
-        self.cursor_pos += c.len_utf8();
-    }
-
-    fn delete_char(&mut self) {
-        if self.cursor_pos == 0 {
-            return;
+    fn focused_field(&mut self) -> &mut Field {
+        match self.focus {
+            KvFocus::Key => &mut self.key,
+            KvFocus::Value => &mut self.value,
         }
-        let before = self.key_input[..self.cursor_pos]
-            .chars()
-            .next_back()
-            .map(char::len_utf8)
-            .unwrap_or(0);
-        let new_pos = self.cursor_pos - before;
-        self.key_input.remove(new_pos);
-        self.cursor_pos = new_pos;
-    }
-
-    fn move_cursor_left(&mut self) {
-        if self.cursor_pos == 0 {
-            return;
-        }
-        let before = self.key_input[..self.cursor_pos]
-            .chars()
-            .next_back()
-            .map(char::len_utf8)
-            .unwrap_or(0);
-        self.cursor_pos -= before;
-    }
-
-    fn move_cursor_right(&mut self) {
-        if self.cursor_pos >= self.key_input.len() {
-            return;
-        }
-        let after = self.key_input[self.cursor_pos..]
-            .chars()
-            .next()
-            .map(char::len_utf8)
-            .unwrap_or(0);
-        self.cursor_pos += after;
     }
 
     /// Handle a key event comming from the TUI
@@ -97,15 +137,16 @@ impl KvStore {
                     peer_id,
                 });
             }
-            KeyCode::Char(c) => self.insert_char(c),
-            KeyCode::Backspace => self.delete_char(),
-            KeyCode::Left => self.move_cursor_left(),
-            KeyCode::Right => self.move_cursor_right(),
+            KeyCode::Tab => self.focus = self.focus.toggle(),
+            KeyCode::Char(c) => self.focused_field().insert_char(c),
+            KeyCode::Backspace => self.focused_field().delete_char(),
+            KeyCode::Left => self.focused_field().move_left(),
+            KeyCode::Right => self.focused_field().move_right(),
             KeyCode::Enter => {
                 actions.push(Action::PutRecord {
                     peer_id,
-                    key: self.key_input.clone(),
-                    value: String::default(),
+                    key: self.key.buf.clone(),
+                    value: self.value.buf.clone(),
                 });
 
                 actions.push(Action::Popup {
@@ -125,8 +166,14 @@ impl KvStore {
             return;
         }
 
-        let footer_text =
-            Line::from(vec![Span::raw("<Esc> exit")]).style(Style::new().fg(Color::White));
+        let footer_text = Line::from(vec![
+            Span::raw("<Esc> exit"),
+            Span::raw(", "),
+            Span::raw("<Tab> switch field"),
+            Span::raw(", "),
+            Span::raw("<Enter> submit"),
+        ])
+        .style(Style::new().fg(Color::White));
 
         let block = Block::new()
             .title("KV Store")
@@ -136,27 +183,48 @@ impl KvStore {
             .border_style(Color::LightRed)
             .padding(Padding::uniform(1));
 
-        // Compute the inner area (inside the border/padding) before rendering the block
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        // Lay out the inner area for the label and input
-        let layout = Layout::vertical([Constraint::Length(1), Constraint::Length(3)]);
-        let [label_area, input_area] = inner.layout(&layout);
+        // label, key input, label, value input.
+        let layout = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+        ]);
+        let [key_label, key_area, value_label, value_area] = inner.layout(&layout);
 
-        let label = Paragraph::new(Text::from(Line::from("Key to store")));
-        frame.render_widget(label, label_area);
+        frame.render_widget(Paragraph::new(Text::from(Line::from("Key"))), key_label);
+        frame.render_widget(Paragraph::new(Text::from(Line::from("Value"))), value_label);
 
-        let input_block = Block::default().borders(Borders::ALL);
-        let input_inner = input_block.inner(input_area);
-        let input = Paragraph::new(self.key_input.as_str())
+        let key_inner = self.render_field(frame, key_area, &self.key, KvFocus::Key);
+        let value_inner = self.render_field(frame, value_area, &self.value, KvFocus::Value);
+
+        // Place the terminal cursor inside the focused field.
+        let (inner_area, field) = match self.focus {
+            KvFocus::Key => (key_inner, &self.key),
+            KvFocus::Value => (value_inner, &self.value),
+        };
+        frame.set_cursor_position((inner_area.x + field.cursor_col(), inner_area.y));
+    }
+
+    /// Render one input field, returning the inner area where the cursor goes.
+    fn render_field(&self, frame: &mut Frame, area: Rect, field: &Field, kind: KvFocus) -> Rect {
+        let border_color = if self.focus == kind {
+            Color::LightCyan
+        } else {
+            Color::DarkGray
+        };
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_color);
+        let inner = input_block.inner(area);
+        let input = Paragraph::new(field.buf.as_str())
             .style(Style::new().fg(Color::White))
             .block(input_block);
-        frame.render_widget(input, input_area);
-
-        // Position the cursor inside the input area
-        let cursor_col = self.key_input[..self.cursor_pos].chars().count() as u16;
-        frame.set_cursor_position((input_inner.x + cursor_col, input_inner.y));
+        frame.render_widget(input, area);
+        inner
     }
 }
 

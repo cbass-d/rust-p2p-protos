@@ -10,9 +10,9 @@ use crate::{
         behaviour::NodeNetworkEvent,
         connection_tracker::ConnectionTracker,
         handlers::{
-            ConnectionOp, Effects, HandlerCtx, KadOp, LogKind, StateMutation, SwarmEventHandler,
+            ConnectionOp, Effects, HandlerCtx, KadOp, KadQueries, LogKind, StateMutation,
+            SwarmEventHandler,
         },
-        kad_handler::KadQueries,
         logger::NodeLogger,
         state::State,
     },
@@ -257,6 +257,7 @@ impl RunningNode {
 
     // Handles an incoming node command from the node network, returns the NodeResponse if any
     fn handle_node_command(&mut self, command: NodeCommand) -> NodeResponse {
+        debug!(target: "simulation::node", cmd = ?command, "new node command recieved");
         match command {
             NodeCommand::ConnectTo { peer } => {
                 debug!(target: "simulation::node", addr = %peer, "connect to command received");
@@ -288,7 +289,27 @@ impl RunningNode {
             NodeCommand::PutRecord { key, value } => {
                 debug!(target: "simulation::node", "put record command received: {key} - {value}");
 
-                NodeResponse::RecordPlaced
+                if let Err(e) = self.base.put_record(key.clone(), value.clone()) {
+                    error!(target: "simulation::node", "put record command failed: {e}");
+                    NodeResponse::Failed
+                } else {
+                    NodeResponse::RecordPlaced
+                }
+            }
+            NodeCommand::GetRecord { key } => {
+                debug!(target: "simulation::node", "get record command received: {key}");
+
+                self.base.get_record(key.clone());
+                NodeResponse::GetRecordPlaced
+            }
+            NodeCommand::ListRecords => {
+                debug!(target: "simulation::node", "list records command received");
+
+                let records = self.base.list_records();
+
+                debug!(target: "simulation::node", "returning list of records: {:?}", records);
+
+                NodeResponse::RecordsList { records }
             }
             NodeCommand::Stop => {
                 debug!(target: "simulation::node", "stop command received");

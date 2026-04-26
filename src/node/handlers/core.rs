@@ -66,6 +66,7 @@ impl SwarmEventHandler for CoreSwarmHandler {
                     ConnectedPoint::Dialer { address, .. } => address,
                     ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
                 };
+
                 effects.kad_ops.push(KadOp::AddAddress {
                     peer: *peer_id,
                     addr: peer_addr,

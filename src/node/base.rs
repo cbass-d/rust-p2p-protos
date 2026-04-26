@@ -5,7 +5,10 @@ use futures::StreamExt;
 use libp2p::{
     Multiaddr, PeerId, Swarm,
     core::transport::ListenerId,
-    kad::{KBucketKey, QueryId, RecordKey, RoutingUpdate},
+    kad::{
+        KBucketKey, QueryId, Quorum, Record, RecordKey, RoutingUpdate,
+        store::{Error, RecordStore},
+    },
     swarm::SwarmEvent,
 };
 use tracing::debug;
@@ -114,6 +117,37 @@ impl NodeBase {
         self.swarm.behaviour_mut().kad.get_closest_peers(peer_id)
     }
 
+    pub(crate) fn put_record(&mut self, key: String, value: String) -> Result<QueryId, Error> {
+        let record = Record::new(key.into_bytes(), value.into_bytes());
+
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .put_record(record, Quorum::One)
+    }
+
+    pub(crate) fn get_record(&mut self, key: String) -> QueryId {
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .get_record(RecordKey::new(&key))
+    }
+
+    pub(crate) fn list_records(&mut self) -> Vec<(String, String)> {
+        self.swarm
+            .behaviour_mut()
+            .kad
+            .store_mut()
+            .records()
+            .map(|r| {
+                (
+                    String::from_utf8_lossy(r.key.as_ref()).into_owned(),
+                    String::from_utf8_lossy(&r.value).into_owned(),
+                )
+            })
+            .collect()
+    }
+
     pub(crate) fn kad_get_closest_local_peers(&mut self, peer_id: PeerId) -> Vec<PeerId> {
         let key = KBucketKey::from(peer_id);
         self.swarm
@@ -141,6 +175,8 @@ impl NodeBase {
         peer_id: &PeerId,
         peer_addr: Multiaddr,
     ) -> RoutingUpdate {
+        debug!(target: "simulation::node::kad", peer = %peer_id, "new peer added to KAD routing peer");
+
         self.swarm
             .behaviour_mut()
             .kad

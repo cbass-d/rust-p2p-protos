@@ -8,9 +8,8 @@ use libp2p::{
     },
     identify::{Behaviour as Identify, Config as IdentifyConfig},
     identity,
-    kad::{Behaviour as Kademlia, store::MemoryStore},
-    mdns::Config as MdnsConfig,
-    mdns::tokio::Behaviour as Mdns,
+    kad::{Behaviour as Kademlia, Mode, store::MemoryStore},
+    mdns::{Config as MdnsConfig, tokio::Behaviour as Mdns},
     multiaddr::Protocol,
     noise,
     swarm::{self, behaviour::toggle::Toggle},
@@ -29,11 +28,10 @@ use crate::{
         behaviour::NodeBehaviour,
         connection_tracker::ConnectionTracker,
         handlers::{
-            CoreSwarmHandler, IdentifyEventHandler, KadEventHandler, MdnsEventHandler,
+            CoreSwarmHandler, IdentifyEventHandler, KadEventHandler, KadQueries, MdnsEventHandler,
             SwarmEventHandler,
         },
         info::{IdentifyInfo, KademliaInfo},
-        kad_handler::KadQueries,
         logger::NodeLogger,
         running::RunningNode,
         state::State,
@@ -106,7 +104,8 @@ impl ConfiguredNode {
         };
 
         let store = MemoryStore::new(peer_id);
-        let kad = Kademlia::new(peer_id, store);
+        let mut kad = Kademlia::new(peer_id, store);
+        kad.set_mode(Some(Mode::Server));
         let mdns = match transport {
             TransportMode::Tcp => Toggle::from(Some(
                 Mdns::new(MdnsConfig::default(), peer_id)

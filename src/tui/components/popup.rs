@@ -14,6 +14,7 @@ use crate::tui::{
     components::{
         identify_info::IdentifyInfo, kademlia_info::KademliaInfo, kv_store::KvStore,
         manage_connections::ManageConnections, node_commands::NodeCommands, node_info::NodeInfo,
+        records_list::RecordsList,
     },
     event_handler::{KeyResult, TuiEventHandler, TuiKeyCtx},
 };
@@ -27,6 +28,7 @@ pub(crate) enum PopUpContent {
     IdentifyInfo,
     KademliaInfo,
     KvStore,
+    RecordsList,
 }
 
 #[derive(Debug)]
@@ -54,6 +56,9 @@ pub(crate) struct Popup {
 
     /// Component for `KvStore` content
     pub kv_store: KvStore,
+
+    /// Component for `RecordsList` content
+    pub records_list: RecordsList,
 }
 
 impl Popup {
@@ -67,6 +72,7 @@ impl Popup {
             kademlia_info: KademliaInfo::new(),
             manage_connections: ManageConnections::new(),
             kv_store: KvStore::new(),
+            records_list: RecordsList::new(),
         }
     }
 
@@ -78,6 +84,7 @@ impl Popup {
         self.identify_info.set_node(node);
         self.kademlia_info.set_node(node);
         self.kv_store.set_node(node);
+        self.records_list.set_node(node);
     }
 
     pub fn set_content(&mut self, content: PopUpContent) {
@@ -119,6 +126,9 @@ impl Popup {
             Some(PopUpContent::KvStore) => {
                 self.kv_store.render(frame, area);
             }
+            Some(PopUpContent::RecordsList) => {
+                self.records_list.render(frame, area);
+            }
             _ => {}
         }
     }
@@ -144,6 +154,9 @@ impl Popup {
             }
             Action::DisplayKvStore { .. } => {
                 self.set_content(PopUpContent::KvStore);
+            }
+            Action::DisplayRecordsList { .. } => {
+                self.set_content(PopUpContent::RecordsList);
             }
             _ => {}
         }
@@ -175,6 +188,9 @@ impl Popup {
             )?,
             Some(PopUpContent::NodeInfo) => self.node_info.handle_key_event(key_event, actions)?,
             Some(PopUpContent::KvStore) => self.kv_store.handle_key_event(key_event, actions),
+            Some(PopUpContent::RecordsList) => {
+                self.records_list.handle_key_event(key_event, actions)?
+            }
             Some(PopUpContent::IdentifyInfo) => {
                 self.identify_info.handle_key_event(key_event, actions)?;
             }
@@ -197,6 +213,7 @@ impl TuiEventHandler for Popup {
         // Forward to all child components; each one self-filters.
         self.identify_info.on_network_event(event, actions);
         self.kademlia_info.on_network_event(event, actions);
+        self.records_list.on_network_event(event, actions);
     }
 
     fn on_key(

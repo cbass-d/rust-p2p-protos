@@ -6,7 +6,6 @@ pub(crate) mod external;
 pub(crate) mod handlers;
 pub(crate) mod history;
 pub(crate) mod info;
-mod kad_handler;
 mod logger;
 pub(crate) mod running;
 mod state;

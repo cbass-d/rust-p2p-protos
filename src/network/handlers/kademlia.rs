@@ -29,5 +29,14 @@ pub(crate) async fn handle(cmd: KademliaCommand, ctx: &mut ControlCtx<'_>) {
             })
             .await;
         }
+        KademliaCommand::RecordsList { peer_id } => {
+            request(peer_id, NodeCommand::ListRecords, ctx, |resp| match resp {
+                NodeResponse::RecordsList { records } => {
+                    Some(NetworkEvent::RecordsList { records })
+                }
+                _ => None,
+            })
+            .await;
+        }
     }
 }

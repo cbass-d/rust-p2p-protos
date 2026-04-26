@@ -47,6 +47,9 @@ pub(crate) enum NetworkEvent {
     /// The kademlia info for a node
     KademliaInfo { info: KademliaInfo },
 
+    /// List of local records for a node
+    RecordsList { records: Vec<(String, String)> },
+
     /// Max number of nodes reached
     MaxNodes,
 }
@@ -89,6 +92,9 @@ pub(crate) enum KademliaCommand {
         key: String,
         value: String,
     },
+
+    /// Get list of local records
+    RecordsList { peer_id: PeerId },
 }
 
 /// Commands that manage network-wide node lifecycle.
@@ -122,6 +128,12 @@ pub(crate) enum NodeCommand {
     /// Put a new KAD record on the node
     PutRecord { key: String, value: String },
 
+    /// Get a KAD record from the DHT
+    GetRecord { key: String },
+
+    /// Get list of local KAD records
+    ListRecords,
+
     /// Stop the node from running
     Stop,
 }
@@ -135,6 +147,9 @@ pub(crate) enum NodeResponse {
     /// Kademlia info
     KademliaInfo { info: KademliaInfo },
 
+    /// List of KAD records
+    RecordsList { records: Vec<(String, String)> },
+
     /// Disconnected from peer
     Disconnected { peer: PeerId },
 
@@ -143,6 +158,9 @@ pub(crate) enum NodeResponse {
 
     /// Record placed
     RecordPlaced,
+
+    /// Get record query placed
+    GetRecordPlaced,
 
     /// Node stopped
     Stopped,
