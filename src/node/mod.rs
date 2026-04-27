@@ -78,3 +78,36 @@ impl fmt::Display for NodeStats {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::node::NodeStats;
+
+    #[test]
+    fn test_new_stats() {
+        let stats = NodeStats::default();
+
+        assert_eq!(stats.total_sent(), 0);
+        assert_eq!(stats.total_recvd(), 0);
+    }
+
+    #[test]
+    fn test_inc_sent() {
+        let mut stats = NodeStats::default();
+
+        stats.inc_sent();
+
+        assert_eq!(stats.total_sent(), 1);
+        assert_eq!(stats.total_recvd(), 0);
+    }
+
+    #[test]
+    fn test_inc_recvd() {
+        let mut stats = NodeStats::default();
+
+        stats.inc_recvd();
+
+        assert_eq!(stats.total_sent(), 0);
+        assert_eq!(stats.total_recvd(), 1);
+    }
+}

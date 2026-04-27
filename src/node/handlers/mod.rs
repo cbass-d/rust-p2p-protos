@@ -70,20 +70,11 @@ pub(crate) enum LogKind {
 }
 
 pub(crate) enum KadOp {
-    AddAddress {
-        peer: PeerId,
-        addr: Multiaddr,
-    },
-    RemovePeer {
-        peer: PeerId,
-    },
+    AddAddress { peer: PeerId, addr: Multiaddr },
+    RemovePeer { peer: PeerId },
     Bootstrap,
-    GetProviders {
-        key: RecordKey,
-    },
-    GetClosestPeers {
-        peer: PeerId,
-    },
+    GetProviders { key: RecordKey },
+    GetClosestPeers { peer: PeerId },
     SetMode(kad::Mode),
     SetBootstrapped(bool),
 }

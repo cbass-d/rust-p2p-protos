@@ -63,3 +63,59 @@ impl State {
         self.cancellation_token.cancelled()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use tokio_util::sync::CancellationToken;
+
+    use crate::node::state::State;
+
+    #[test]
+    fn test_new_state() {
+        let start = Instant::now();
+        let state = State::new(start, CancellationToken::new());
+
+        assert!(!state.killed());
+        assert!(!state.bootstrapped());
+        assert!(!state.stopped());
+        assert_eq!(state.start(), start);
+    }
+
+    #[test]
+    fn test_stopped() {
+        let start = Instant::now();
+        let mut state = State::new(start, CancellationToken::new());
+
+        state.stop();
+
+        assert!(state.stopped());
+        assert!(!state.killed());
+        assert!(!state.bootstrapped());
+    }
+
+    #[test]
+    fn test_killed() {
+        let start = Instant::now();
+        let mut state = State::new(start, CancellationToken::new());
+
+        state.kill();
+
+        assert!(state.killed());
+        assert!(!state.bootstrapped());
+        assert!(!state.stopped());
+    }
+
+    #[test]
+    fn test_bootstrapped() {
+        let start = Instant::now();
+        let mut state = State::new(start, CancellationToken::new());
+
+        state.bootstrap();
+
+        assert!(state.bootstrapped());
+        assert!(!state.killed());
+        assert!(!state.stopped());
+    }
+}

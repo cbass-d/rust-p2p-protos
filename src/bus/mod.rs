@@ -42,3 +42,46 @@ impl<E: Clone + Send + 'static> fmt::Debug for EventBus<E> {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::broadcast::error::TryRecvError;
+
+    use crate::bus::EventBus;
+
+    #[test]
+    fn test_clone_shares_channel() {
+        let bus = EventBus::<i32>::new(2);
+        let cloned = bus.clone();
+        let mut rx = bus.subscribe();
+
+        cloned.publish(1);
+
+        assert_eq!(rx.try_recv().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_distinct_subscribers() {
+        let bus = EventBus::<i32>::new(2);
+        let mut rx1 = bus.subscribe();
+        let mut rx2 = bus.subscribe();
+
+        bus.publish(1);
+        bus.publish(2);
+
+        assert_eq!(rx1.try_recv().unwrap(), 1);
+        assert_eq!(rx1.try_recv().unwrap(), 2);
+
+        assert_eq!(rx2.try_recv().unwrap(), 1);
+        assert_eq!(rx2.try_recv().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_no_replay() {
+        let bus = EventBus::<i32>::new(2);
+
+        let mut rx = bus.subscribe();
+
+        assert_eq!(rx.try_recv(), Err(TryRecvError::Empty))
+    }
+}

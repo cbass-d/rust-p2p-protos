@@ -74,8 +74,18 @@ mod tests {
     }
 
     #[test]
+    fn test_add_peer() {
+        let connections = ConnectionTracker::default();
+        let peer_id = PeerId::random();
+
+        connections.add_active_peer(peer_id);
+        assert!(connections.has_connection(&peer_id));
+        assert_eq!(connections.connection_count(), 1);
+    }
+
+    #[test]
     fn test_add_and_remove_peer() {
-        let mut connections = ConnectionTracker::default();
+        let connections = ConnectionTracker::default();
         let peer_id = PeerId::random();
 
         connections.add_active_peer(peer_id);
@@ -88,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_add_duplicate_peer() {
-        let mut connections = ConnectionTracker::default();
+        let connections = ConnectionTracker::default();
         let peer_id = PeerId::random();
 
         connections.add_active_peer(peer_id);
@@ -113,7 +123,7 @@ mod tests {
 
     #[test]
     fn test_returns_shared_ref() {
-        let mut connections = ConnectionTracker::default();
+        let connections = ConnectionTracker::default();
         let peer_id = PeerId::random();
         connections.add_active_peer(peer_id);
 

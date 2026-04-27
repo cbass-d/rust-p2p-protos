@@ -417,3 +417,181 @@ impl fmt::Display for SwarmEventInfo {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use libp2p::{Multiaddr, PeerId, kad::Mode};
+
+    use crate::node::history::{
+        ALL_MAX_SIZE, IdentifyEventInfo, KadEventInfo, LogMessage, MAX_SIZE, MdnsEventInfo,
+        MessageHistory, SwarmEventInfo,
+    };
+
+    #[test]
+    fn test_new_history() {
+        let history = MessageHistory::default();
+
+        assert!(history.kad_messages().is_empty());
+        assert!(history.identify_messages().is_empty());
+        assert!(history.mdns_messages().is_empty());
+        assert!(history.swarm_messages().is_empty());
+        assert!(history.all_messages().is_empty());
+    }
+
+    #[test]
+    fn test_add_to_identify() {
+        let mut history = MessageHistory::default();
+
+        history.add_identify_event(
+            IdentifyEventInfo::Sent {
+                peer_id: PeerId::random(),
+            },
+            Duration::default(),
+        );
+
+        assert_eq!(history.identify_messages().len(), 1);
+        assert_eq!(history.all_messages().len(), 1);
+
+        assert!(history.mdns_messages().is_empty());
+        assert!(history.swarm_messages().is_empty());
+        assert!(history.kad_messages().is_empty());
+    }
+
+    #[test]
+    fn test_add_to_kad() {
+        let mut history = MessageHistory::default();
+
+        history.add_kademlia_event(
+            KadEventInfo::ModeChanged {
+                new_mode: Mode::Client,
+            },
+            Duration::default(),
+        );
+
+        assert_eq!(history.kad_messages().len(), 1);
+        assert_eq!(history.all_messages().len(), 1);
+
+        assert!(history.mdns_messages().is_empty());
+        assert!(history.swarm_messages().is_empty());
+        assert!(history.identify_messages().is_empty());
+    }
+
+    #[test]
+    fn test_add_to_mdns() {
+        let mut history = MessageHistory::default();
+
+        history.add_mdns_event(
+            MdnsEventInfo::Expired {
+                peer_id: PeerId::random(),
+                address: Multiaddr::empty(),
+            },
+            Duration::default(),
+        );
+
+        assert_eq!(history.mdns_messages().len(), 1);
+        assert_eq!(history.all_messages().len(), 1);
+
+        assert!(history.identify_messages().is_empty());
+        assert!(history.swarm_messages().is_empty());
+        assert!(history.kad_messages().is_empty());
+    }
+
+    #[test]
+    fn test_add_to_swarm() {
+        let mut history = MessageHistory::default();
+
+        history.add_swarm_event(
+            SwarmEventInfo::Dialing {
+                peer_id: Some(PeerId::random()),
+            },
+            Duration::default(),
+        );
+
+        assert_eq!(history.swarm_messages().len(), 1);
+        assert_eq!(history.all_messages().len(), 1);
+
+        assert!(history.mdns_messages().is_empty());
+        assert!(history.identify_messages().is_empty());
+        assert!(history.kad_messages().is_empty());
+    }
+
+    #[test]
+    fn test_add_to_all() {
+        let mut history = MessageHistory::default();
+
+        history.add_to_all(LogMessage::Kad {
+            event: KadEventInfo::ModeChanged {
+                new_mode: Mode::Client,
+            },
+            at: 0.0,
+        });
+
+        assert_eq!(history.all_messages().len(), 1);
+
+        assert!(history.mdns_messages().is_empty());
+        assert!(history.identify_messages().is_empty());
+        assert!(history.swarm_messages().is_empty());
+        assert!(history.kad_messages().is_empty());
+    }
+
+    #[test]
+    fn test_add_capacity_protocol() {
+        let mut history = MessageHistory::default();
+        let event = IdentifyEventInfo::Sent {
+            peer_id: PeerId::random(),
+        };
+
+        for i in 0..=MAX_SIZE {
+            history.add_identify_event(event.clone(), Duration::from_secs(i as u64));
+        }
+
+        let messages = history.identify_messages();
+
+        assert_eq!(messages.len(), MAX_SIZE);
+
+        let LogMessage::Identify { at, .. } = &messages[0] else {
+            panic!("expected identify messgae");
+        };
+
+        assert_eq!(*at, 1.0);
+
+        let LogMessage::Identify { at, .. } = &messages[MAX_SIZE - 1] else {
+            panic!("expected identify messgae");
+        };
+
+        assert_eq!(*at, MAX_SIZE as f32);
+    }
+
+    #[test]
+    fn test_add_capacity_all() {
+        let mut history = MessageHistory::default();
+        let event = IdentifyEventInfo::Sent {
+            peer_id: PeerId::random(),
+        };
+
+        for i in 0..=ALL_MAX_SIZE {
+            history.add_to_all(LogMessage::Identify {
+                event: event.clone(),
+                at: i as f32,
+            });
+        }
+
+        let messages = history.all_messages();
+
+        assert_eq!(messages.len(), ALL_MAX_SIZE);
+
+        let LogMessage::Identify { at, .. } = &messages[0] else {
+            panic!("expected identify messgae");
+        };
+
+        assert_eq!(*at, 1.0);
+
+        let LogMessage::Identify { at, .. } = &messages[ALL_MAX_SIZE - 1] else {
+            panic!("expected identify messgae");
+        };
+
+        assert_eq!(*at, ALL_MAX_SIZE as f32);
+    }
+}
