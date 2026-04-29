@@ -11,11 +11,11 @@ use crate::node::NodeStats;
 use crate::node::history::MessageHistory;
 use crate::node::info::{IdentifyInfo, KademliaInfo};
 
-pub(crate) type CommandChannel = (NodeCommand, oneshot::Sender<NodeResponse>);
+pub type CommandChannel = (NodeCommand, oneshot::Sender<NodeResponse>);
 
 /// Event emitted by the Node Network
 #[derive(Clone, Debug)]
-pub(crate) enum NetworkEvent {
+pub enum NetworkEvent {
     /// A new node has started running
     NodeRunning {
         peer_id: PeerId,
@@ -114,7 +114,7 @@ pub(crate) enum LifecycleCommand {
 
 /// A command sent to a node from the node network
 #[derive(Debug)]
-pub(crate) enum NodeCommand {
+pub enum NodeCommand {
     /// Establish a connection with the requested peer
     ConnectTo { peer: Multiaddr },
 
@@ -142,7 +142,7 @@ pub(crate) enum NodeCommand {
 
 /// The response a node sends back after receiving a `NodeCommand`
 #[derive(Debug, PartialEq)]
-pub(crate) enum NodeResponse {
+pub enum NodeResponse {
     /// Local identify info
     IdentifyInfo { info: IdentifyInfo },
 

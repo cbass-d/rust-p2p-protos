@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// Top-level application error.
 #[derive(Error, Debug)]
-pub(crate) enum AppError {
+pub enum AppError {
     #[error("bind address missing for tcp mode")]
     NoBindAddress,
     #[error("failed to build simulation: {0}")]

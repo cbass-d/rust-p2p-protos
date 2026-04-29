@@ -5,24 +5,24 @@ use std::fmt;
 use tokio::sync::broadcast;
 
 /// A multi-subscriber, in-memory event bus.
-pub(crate) struct EventBus<E: Clone + Send + 'static> {
+pub struct EventBus<E: Clone + Send + 'static> {
     tx: broadcast::Sender<E>,
 }
 
 impl<E: Clone + Send + 'static> EventBus<E> {
     /// Build a bus with a fixed-capacity ring buffer.
-    pub(crate) fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
         Self { tx }
     }
 
     /// Non-blocking publish; silently drops when there are no subscribers.
-    pub(crate) fn publish(&self, event: E) {
+    pub fn publish(&self, event: E) {
         let _ = self.tx.send(event);
     }
 
     /// Attach a new subscriber with its own independent lag position.
-    pub(crate) fn subscribe(&self) -> broadcast::Receiver<E> {
+    pub fn subscribe(&self) -> broadcast::Receiver<E> {
         self.tx.subscribe()
     }
 }

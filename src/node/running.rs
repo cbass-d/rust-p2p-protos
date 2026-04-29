@@ -20,7 +20,7 @@ use crate::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// A node that is actively running in the network
-pub(crate) struct RunningNode {
+pub struct RunningNode {
     /// The core/base of the node
     pub(crate) base: NodeBase,
 

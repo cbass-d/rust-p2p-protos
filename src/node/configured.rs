@@ -41,9 +41,9 @@ use crate::{
 const NODE_COMMAND_CHANNEL_SIZE: usize = 100;
 
 /// A node with libp2p swarm configured
-pub(crate) struct ConfiguredNode {
+pub struct ConfiguredNode {
     /// The core/base of the node
-    pub(crate) base: NodeBase,
+    pub base: NodeBase,
 
     /// The peers the node knows at build time
     known_peers: Vec<Multiaddr>,
@@ -166,7 +166,7 @@ impl ConfiguredNode {
     }
 
     /// Transitions from `ConfiguredNode` to a `RunningNode` instance consuming itself
-    pub fn start(self) -> RunningNode {
+    pub fn build(self) -> RunningNode {
         let mut connection_tracker = ConnectionTracker::default();
         connection_tracker.set_known(self.known_peers);
 

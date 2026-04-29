@@ -23,9 +23,9 @@ use crate::{
 };
 
 /// The base structure for a node
-pub(crate) struct NodeBase {
+pub struct NodeBase {
     /// `PeerId` of the node in the libp2p swarm network
-    pub(crate) peer_id: PeerId,
+    pub peer_id: PeerId,
 
     /// The custom libp2p swarm behaviour
     /// - identify
@@ -42,7 +42,7 @@ pub(crate) struct NodeBase {
     pub(crate) kad_info: KademliaInfo,
 
     /// libp2p swarm listen address
-    pub(crate) listen_address: Multiaddr,
+    pub listen_address: Multiaddr,
 
     /// Address that the node is binded to
     pub(crate) bind_address: Option<Ipv4Addr>,

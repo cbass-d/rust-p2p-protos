@@ -1,13 +1,13 @@
 mod base;
 mod behaviour;
-pub(crate) mod configured;
+pub mod configured;
 mod connection_tracker;
 pub(crate) mod external;
 pub(crate) mod handlers;
 pub(crate) mod history;
 pub(crate) mod info;
 mod logger;
-pub(crate) mod running;
+pub mod running;
 mod state;
 
 use core::fmt;
@@ -20,7 +20,7 @@ const NODE_NETWORK_AGENT: &str = "node-network/0.1";
 
 /// Errors that occur at the node level
 #[derive(Error, Debug)]
-pub(crate) enum NodeError {
+pub enum NodeError {
     #[error("node configuration failed: {0}")]
     Config(String),
     #[error("swarm listen failed")]
@@ -39,7 +39,7 @@ pub(crate) enum NodeError {
 
 /// The result after a node has stopped running
 #[derive(Debug)]
-pub(crate) enum NodeResult {
+pub enum NodeResult {
     Success,
     Killed,
 }

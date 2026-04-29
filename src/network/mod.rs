@@ -20,7 +20,7 @@ mod handlers;
 
 /// Transport the nodes operate on.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TransportMode {
+pub enum TransportMode {
     Memory,
     Tcp,
 }
@@ -218,7 +218,7 @@ impl NodeNetwork {
 
             // Run the newly built node
             node_task_set.spawn(async move {
-                let mut running_node = node.start();
+                let mut running_node = node.build();
                 running_node.run().await
             });
 

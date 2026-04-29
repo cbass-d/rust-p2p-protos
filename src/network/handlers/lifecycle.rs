@@ -36,7 +36,7 @@ pub(crate) async fn handle(
                     ctx.addresses.insert(peer_id, listen_address);
 
                     task_set.spawn(async move {
-                        let mut running_node = node.start();
+                        let mut running_node = node.build();
                         running_node.run().await
                     });
 
@@ -70,9 +70,7 @@ mod tests {
 
     use crate::{
         bus::EventBus,
-        messages::{
-            LifecycleCommand, NetworkCommand, NetworkEvent, NodeCommand, NodeResponse, SwarmCommand,
-        },
+        messages::{LifecycleCommand, NetworkEvent, NodeCommand},
         network::{
             TransportMode,
             handlers::{ControlCtx, handle_lifecycle},
