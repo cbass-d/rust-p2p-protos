@@ -45,7 +45,9 @@ impl<E: Clone + Send + 'static> fmt::Debug for EventBus<E> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::broadcast::error::TryRecvError;
+    use std::time::Duration;
+
+    use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
     use crate::bus::EventBus;
 
@@ -83,5 +85,26 @@ mod tests {
         let mut rx = bus.subscribe();
 
         assert_eq!(rx.try_recv(), Err(TryRecvError::Empty))
+    }
+
+    #[tokio::test]
+    async fn test_slow_subscriber() {
+        let bus = EventBus::<i32>::new(1);
+        let mut rx = bus.subscribe();
+
+        bus.publish(1);
+        bus.publish(2);
+
+        let lagged = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .expect("recv timeout");
+
+        assert_eq!(lagged, Err(RecvError::Lagged(1)));
+
+        let remaining = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .expect("recv timeout");
+
+        assert_eq!(remaining, Ok(2));
     }
 }
