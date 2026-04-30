@@ -59,7 +59,7 @@ mod tests {
 
         cloned.publish(1);
 
-        assert_eq!(rx.try_recv().unwrap(), 1);
+        assert_eq!(rx.try_recv().expect("bus recv failed"), 1);
     }
 
     #[test]
@@ -71,11 +71,11 @@ mod tests {
         bus.publish(1);
         bus.publish(2);
 
-        assert_eq!(rx1.try_recv().unwrap(), 1);
-        assert_eq!(rx1.try_recv().unwrap(), 2);
+        assert_eq!(rx1.try_recv().expect("bus recv failed"), 1);
+        assert_eq!(rx1.try_recv().expect("bus recv failed"), 2);
 
-        assert_eq!(rx2.try_recv().unwrap(), 1);
-        assert_eq!(rx2.try_recv().unwrap(), 2);
+        assert_eq!(rx2.try_recv().expect("bus recv failed"), 1);
+        assert_eq!(rx2.try_recv().expect("bus recv failed"), 2);
     }
 
     #[test]
