@@ -1,4 +1,5 @@
 # p2p-protos
+[![CI](https://github.com/cbass-d/p2p-protos/actions/workflows/ci.yml/badge.svg)](https://github.com/cbass-d/p2p-protos/actions/workflows/ci.yml)
 
 A multi-node libp2p simulator with a terminal UI. Spin up a local swarm of peers, connect and disconnect them on the fly, watch the Kademlia DHT and mDNS discovery in action, and inspect protocol traffic.
 

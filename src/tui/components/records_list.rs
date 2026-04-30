@@ -5,15 +5,14 @@ use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::{Color, Style, Stylize},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, Padding, Paragraph, Widget, Wrap},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, Padding, Paragraph, Widget},
 };
 
 use tracing::{debug, warn};
 
 use crate::{
     messages::NetworkEvent,
-    node::info::IdentifyInfo as NodeIdentifyInfo,
     tui::{
         action_queue::ActionQueue,
         app::Action,
