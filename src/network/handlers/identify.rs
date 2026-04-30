@@ -68,7 +68,7 @@ mod tests {
             Keypair::generate_ed25519().public(),
             "/test/1.0.0".to_string(),
             "test-agent".to_string(),
-            "/memory/1234".parse().expected("invalid multiaddr"),
+            "/memory/1234".parse().expect("invalid multiaddr"),
         );
 
         let stub_node = async {
