@@ -1,8 +1,37 @@
 # p2p-protos
 
-A peer-to-peer networking prototype built with Rust. It spawns a local network of libp2p nodes and provides a terminal UI (TUI) for interacting with them in real time.
+A multi-node libp2p simulator with a terminal UI. Spin up a local swarm of peers, connect and disconnect them on the fly, watch the Kademlia DHT and mDNS discovery in action, and inspect protocol traffic.
 
-The nodes use the Identify and Kademlia protocols. You can connect and disconnect nodes, start and stop them, and inspect protocol-level information, all from the terminal interface.
+Built to learn distributed-systems primitives by running them, not reading about them.
+
+![demo](docs/demo.gif)
+
+## What it does
+
+- **Run a local swarm** of up to 10 nodes on either an in-process `MemoryTransport` or real `TCP` (with noise + yamux).
+- **Drive each node from the TUI** — connect / disconnect / start / stop nodes, inspect their state, see live protocol traffic.
+- **Implements four libp2p protocols:**
+  - **Kademlia** — bootstrap, get/put records, list local records, peer routing
+  - **Identify** — peer info exchange
+  - **mDNS** — local peer discovery
+  - **Swarm** — connection lifecycle
+- **Structured tracing** with logs and per-target log levels.
+
+## Architecture
+
+```
+TUI ──events──▶ NodeNetwork ──commands──▶ Node ──┐
+ ▲                  │                            │
+ │                  ▼                            ▼
+ └──────────── EventBus ◀─────── effects ◀── handlers
+```
+
+- **Typed event bus** (`tokio::broadcast`-backed) fans `NetworkEvent`s out to every subscriber — TUI, observers, tests.
+- **Per-protocol handler chain** (`SwarmEventHandler` trait): swarm events flow through an ordered chain; the first handler returning `Ok(true)` claims the event and produces an `Effects` struct.
+- **Effects-as-data**: handlers don't perform I/O — they describe what the node should do (dials, kad operations, state mutations, events to publish). `RunningNode::apply_effects` is the single piece of code that runs them.
+- **Cooperative cancellation** via `CancellationToken` for clean shutdown across all spawned tasks.
+
+This split makes each piece independently testable and the data flow easy to follow.
 
 ## Build
 
@@ -10,34 +39,43 @@ The nodes use the Identify and Kademlia protocols. You can connect and disconnec
 cargo build --release
 ```
 
-## Usage
+## Run
 
 ```
-./target/release/p2p-protos [OPTIONS]
+p2p-protos [OPTIONS] <TRANSPORT_MODE> [BIND_ADDRESS]
 ```
 
-### Options
+| Argument | Description |
+|---|---|
+| `<TRANSPORT_MODE>` | `memory` (in-process) or `tcp` |
+| `[BIND_ADDRESS]` | Required when `TRANSPORT_MODE=tcp`. IPv4 (e.g. `127.0.0.1`). |
+| `-n, --nodes <N>` | Number of nodes to start (default `5`, max `10`) |
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-n, --nodes <N>` | Number of nodes to start | 5 |
-
-### Example
-
-Start a network with 3 nodes:
+Examples:
 
 ```
-./target/release/p2p-protos -n 3
+p2p-protos -n 3 memory
+p2p-protos -n 5 tcp 127.0.0.1
 ```
 
-## TUI Controls
+## TUI controls
 
-The interface has three panels: a node visualization box, a node list, and a log viewer. Press `Tab` to switch focus between the node list and the log viewer. Interact with nodes through popup menus (connect, disconnect, start, stop, view info). Press `Esc` to close popups and `q` to quit.
+Three panels: a node visualization box, a node list, and a log viewer.
+
+- `Tab` — switch focus between the node list and the log viewer
+- `Esc` — close popups
+- `q` — quit
+- Interact with nodes (connect, disconnect, start, stop, view info) through popup menus on the node list.
 
 ## Logging
 
-Logs are written to `logs/p2p.log` on a daily rolling basis. Set the log level with the `RUST_LOG` environment variable:
+Logs are written to `logs/p2p.log` (rotated daily). Override the level with `RUST_LOG`:
 
 ```
-RUST_LOG=debug cargo run
+RUST_LOG=debug cargo run -- memory
+RUST_LOG=p2p_protos=trace,libp2p=info cargo run -- memory
 ```
+
+## Tech stack
+
+`tokio` · `libp2p` (kad, identify, mdns, noise, yamux, tcp) · `ratatui` · `tracing` · `clap` · `thiserror`

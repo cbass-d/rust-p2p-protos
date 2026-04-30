@@ -41,7 +41,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn test_get_info_command() {
+    async fn test_get_identify_info_command() {
         let p1 = PeerId::random();
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(10);
