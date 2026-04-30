@@ -173,7 +173,7 @@ mod tests {
     #[tokio::test]
     async fn test_stop_node_command() {
         let peer_one = PeerId::random();
-        let peer_one_addr: Multiaddr = "/memory/1234".parse().unwrap();
+        let peer_one_addr: Multiaddr = "/memory/1234".parse().expect("invalid multiaddr");
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(10);
         let mut nodes = HashMap::new();
@@ -241,7 +241,7 @@ mod tests {
         };
 
         let peer_id = PeerId::random();
-        let address: Multiaddr = "/memory/1234".parse().unwrap();
+        let address: Multiaddr = "/memory/1234".parse().expect("invalid multiaddr");
 
         let mut task_set: JoinSet<Result<NodeResult, NodeError>> = JoinSet::new();
 

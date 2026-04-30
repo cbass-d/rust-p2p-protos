@@ -58,7 +58,7 @@ mod tests {
     async fn test_connect_command() {
         let peer_one = PeerId::random();
         let peer_two = PeerId::random();
-        let peer_two_addr: Multiaddr = "/memory/1234".parse().unwrap();
+        let peer_two_addr: Multiaddr = "/memory/1234".parse().expect("invalid multiaddr");
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel(10);
         let mut nodes = HashMap::new();
