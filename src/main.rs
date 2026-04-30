@@ -1,4 +1,3 @@
-#![warn(clippy::pedantic)]
 #![deny(clippy::unwrap_used)]
 
 use clap::Parser;

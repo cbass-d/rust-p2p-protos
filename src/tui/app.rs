@@ -23,7 +23,7 @@ use crate::{
         SwarmCommand,
     },
     network::TransportMode,
-    node::{NodeStats, history::MessageHistory},
+    node::NodeLogsHandle,
     tui::{
         Tui, TuiEvent,
         action_queue::ActionQueue,
@@ -142,7 +142,7 @@ pub(crate) struct App {
     network_command_tx: mpsc::Sender<NetworkCommand>,
 
     /// Message histories and stats of the nodes
-    node_logs: HashMap<PeerId, (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
+    node_logs: HashMap<PeerId, NodeLogsHandle>,
 
     /// Component for displaying the nodes on Canvas
     node_box: NodeBox,

@@ -101,12 +101,10 @@ mod tests {
         let kad_mode = Mode::Server;
 
         let stub_subscriber = async {
-            let event = tokio::time::timeout(Duration::from_secs(3), event_rx.recv())
+            tokio::time::timeout(Duration::from_secs(3), event_rx.recv())
                 .await
                 .expect("event recv timedout")
-                .expect("event bus closed");
-
-            event
+                .expect("event bus closed")
         };
 
         let handler = handle_lifecycle(
@@ -150,12 +148,10 @@ mod tests {
         let kad_mode = Mode::Server;
 
         let stub_subscriber = async {
-            let event = tokio::time::timeout(Duration::from_secs(3), event_rx.recv())
+            tokio::time::timeout(Duration::from_secs(3), event_rx.recv())
                 .await
                 .expect("event recv timedout")
-                .expect("event bus closed");
-
-            event
+                .expect("event bus closed")
         };
 
         let handler = handle_lifecycle(
@@ -167,7 +163,7 @@ mod tests {
         let ((), event) = tokio::join!(handler, stub_subscriber);
 
         assert!(matches!(event, NetworkEvent::MaxNodes));
-        assert_eq!(nodes.len(), 1)
+        assert_eq!(nodes.len(), 1);
     }
 
     #[tokio::test]
@@ -207,7 +203,7 @@ mod tests {
 
         let handler = handle_lifecycle(
             LifecycleCommand::Stop {
-                peer_id: peer_one.clone(),
+                peer_id: peer_one,
             },
             &mut ctx,
             &mut task_set,
@@ -247,7 +243,7 @@ mod tests {
 
         handle_lifecycle(
             LifecycleCommand::AddExternal {
-                peer_id: peer_id,
+                peer_id,
                 address: address.clone(),
             },
             &mut ctx,

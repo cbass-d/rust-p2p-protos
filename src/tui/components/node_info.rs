@@ -136,11 +136,8 @@ impl NodeInfo {
     }
 
     pub fn update(&mut self, action: &Action, _actions: &mut ActionQueue) {
-        match action {
-            Action::DisplayInfo { peer_id } => {
-                self.node = Some(*peer_id);
-            }
-            _ => {}
+        if let Action::DisplayInfo { peer_id } = action {
+            self.node = Some(*peer_id);
         }
     }
 }

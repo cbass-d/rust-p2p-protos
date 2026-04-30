@@ -62,6 +62,7 @@ pub(crate) struct Effects {
     pub published: Vec<NetworkEvent>,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum LogKind {
     Swarm(SwarmEventInfo),
     Identify(IdentifyEventInfo),

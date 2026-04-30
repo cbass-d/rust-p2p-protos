@@ -19,16 +19,11 @@ use crate::{
 mod handlers;
 
 /// Transport the nodes operate on.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum TransportMode {
+    #[default]
     Memory,
     Tcp,
-}
-
-impl Default for TransportMode {
-    fn default() -> Self {
-        TransportMode::Memory
-    }
 }
 
 /// Owns the node command channels and address book, and routes TUI
@@ -172,7 +167,7 @@ impl NodeNetwork {
                     }
 
                     if node_task_set.is_empty() {
-                        return Err(AppError::AllNodesExited.into());
+                        return Err(AppError::AllNodesExited);
                     }
                 }
             }

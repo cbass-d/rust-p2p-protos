@@ -11,11 +11,17 @@ mod state;
 
 use core::fmt;
 use libp2p::StreamProtocol;
-use std::io;
+use parking_lot::RwLock;
+use std::{io, sync::Arc};
 use thiserror::Error;
+
+use crate::node::history::MessageHistory;
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const NODE_NETWORK_AGENT: &str = "node-network/0.1";
+
+/// Shared handle to a node's message history and stats — used by the TUI.
+pub type NodeLogsHandle = (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>);
 
 /// Errors that occur at the node level
 #[derive(Error, Debug)]
@@ -62,7 +68,7 @@ impl NodeStats {
 
 impl fmt::Display for NodeStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Packets received: {}\n", self.recvd_count)
+        writeln!(f, "Packets received: {}", self.recvd_count)
     }
 }
 

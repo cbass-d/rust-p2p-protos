@@ -18,6 +18,7 @@ pub struct NodeBehaviour {
 
 /// libp2p swarm events for our node behaviour
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum NodeNetworkEvent {
     Identify(identify::Event),
     Kademlia(kad::Event),

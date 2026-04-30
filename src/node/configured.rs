@@ -96,11 +96,9 @@ impl ConfiguredNode {
                     "bind address required for tcp mode".into(),
                 ))?;
 
-                let listen_addr = format!("/ip4/{bind_address}/tcp/0")
+                format!("/ip4/{bind_address}/tcp/0")
                     .parse()
-                    .map_err(|e| NodeError::Config(format!("invalid listen address: {e}")))?;
-
-                listen_addr
+                    .map_err(|e| NodeError::Config(format!("invalid listen address: {e}")))?
             }
         };
 

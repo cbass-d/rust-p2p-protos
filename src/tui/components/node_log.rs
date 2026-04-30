@@ -2,7 +2,6 @@ use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use indexmap::IndexSet;
 use libp2p::PeerId;
-use parking_lot::RwLock;
 use ratatui::{
     Frame,
     layout::{Alignment, Margin, Rect},
@@ -12,12 +11,11 @@ use ratatui::{
         ScrollbarState, Widget,
     },
 };
-use std::sync::Arc;
 
 use tracing::warn;
 
 use crate::{
-    node::{NodeStats, history::MessageHistory},
+    node::NodeLogsHandle,
     tui::{
         action_queue::ActionQueue,
         app::Action,
@@ -28,7 +26,7 @@ use crate::{
 /// Scrollable log panel for the selected node.
 #[derive(Debug, Clone)]
 pub(crate) struct NodeLog {
-    selected: Option<(Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>)>,
+    selected: Option<NodeLogsHandle>,
     pub list_state: ListState,
     pub scrollbar_state: ScrollbarState,
 
@@ -162,10 +160,7 @@ impl NodeLog {
         }
     }
 
-    pub fn display_logs(
-        &mut self,
-        message_and_stats: (Arc<RwLock<MessageHistory>>, Arc<RwLock<NodeStats>>),
-    ) {
+    pub fn display_logs(&mut self, message_and_stats: NodeLogsHandle) {
         self.selected = Some(message_and_stats);
     }
 }

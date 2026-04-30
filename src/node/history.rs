@@ -15,6 +15,7 @@ use ratatui::{
 };
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum LogMessage {
     Swarm { event: SwarmEventInfo, at: f32 },
     Kad { event: KadEventInfo, at: f32 },

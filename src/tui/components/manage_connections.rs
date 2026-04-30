@@ -329,15 +329,12 @@ impl ManageConnections {
         _actions: &mut ActionQueue,
         _active_nodes: &IndexSet<PeerId>,
     ) {
-        match action {
-            Action::DisplayManageConnections { peer_id } => {
-                self.node = Some(*peer_id);
-                self.focus = Focus::Internal;
-                if self.internal_state.selected().is_none() {
-                    self.internal_state.select(Some(0));
-                }
+        if let Action::DisplayManageConnections { peer_id } = action {
+            self.node = Some(*peer_id);
+            self.focus = Focus::Internal;
+            if self.internal_state.selected().is_none() {
+                self.internal_state.select(Some(0));
             }
-            _ => {}
         }
     }
 }

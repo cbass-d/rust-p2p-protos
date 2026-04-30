@@ -5,10 +5,7 @@ use p2p_protos::{
     bus::EventBus,
     messages::{CommandChannel, NetworkEvent},
     network::TransportMode,
-    node::{
-        NodeError, NodeResult,
-        configured::{self, ConfiguredNode},
-    },
+    node::{NodeError, NodeResult, configured::ConfiguredNode},
 };
 use tokio::{
     sync::{broadcast::Receiver, mpsc},
@@ -20,6 +17,7 @@ pub fn test_bus() -> EventBus<NetworkEvent> {
     EventBus::new(48)
 }
 
+#[allow(dead_code)]
 pub struct TestNode {
     pub peer_id: PeerId,
     pub listen_address: Multiaddr,
