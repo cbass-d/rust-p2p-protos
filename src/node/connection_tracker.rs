@@ -27,6 +27,7 @@ impl ConnectionTracker {
         current_peers.len()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn known_peers_count(&self) -> usize {
         self.known_peers.len()
     }

@@ -13,13 +13,10 @@ use libp2p::{
 };
 use tracing::debug;
 
-use crate::{
-    network::TransportMode,
-    node::{
-        NodeError,
-        behaviour::{NodeBehaviour, NodeNetworkEvent},
-        info::{IdentifyInfo, KBucketInfo, KademliaInfo},
-    },
+use crate::node::{
+    NodeError,
+    behaviour::{NodeBehaviour, NodeNetworkEvent},
+    info::{IdentifyInfo, KBucketInfo, KademliaInfo},
 };
 
 /// The base structure for a node
@@ -46,9 +43,6 @@ pub struct NodeBase {
 
     /// Address that the node is binded to
     pub(crate) bind_address: Option<Ipv4Addr>,
-
-    /// The transport mode the node is operating in
-    pub(crate) transport_mode: TransportMode,
 }
 
 impl NodeBase {
@@ -60,7 +54,6 @@ impl NodeBase {
         kad_info: KademliaInfo,
         listen_address: Multiaddr,
         bind_address: Option<Ipv4Addr>,
-        transport_mode: TransportMode,
         kad_mode: Mode,
     ) -> Self {
         Self {
@@ -70,7 +63,6 @@ impl NodeBase {
             kad_info,
             listen_address,
             bind_address,
-            transport_mode,
             kad_mode,
         }
     }

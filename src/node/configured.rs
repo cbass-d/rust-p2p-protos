@@ -150,7 +150,6 @@ impl ConfiguredNode {
             kad_info,
             listen_address,
             bind_address,
-            transport,
             kad_mode,
         );
 

@@ -6,7 +6,7 @@ use libp2p::{
 
 /// Local identify info for a node
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct IdentifyInfo {
+pub struct IdentifyInfo {
     pub public_key: PublicKey,
     pub protocol_version: String,
     pub agent_string: String,
@@ -32,14 +32,14 @@ impl IdentifyInfo {
 
 /// Struct to hold info about a kbucket
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct KBucketInfo {
+pub struct KBucketInfo {
     pub range: (U256, U256),
     pub num_entries: usize,
 }
 
 /// Local kademlia info for a node.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct KademliaInfo {
+pub struct KademliaInfo {
     pub mode: Mode,
     pub bootstrapped: bool,
     pub closest_peers: Vec<PeerId>,

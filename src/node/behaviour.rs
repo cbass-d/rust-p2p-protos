@@ -10,7 +10,7 @@ use libp2p::{
 /// Node behaviour for our peers. Currently has identify and kademlia. (more in the future)
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "NodeNetworkEvent")]
-pub(crate) struct NodeBehaviour {
+pub struct NodeBehaviour {
     pub kad: kad::Behaviour<MemoryStore>,
     pub identify: identify::Behaviour,
     pub mdns: Toggle<mdns::tokio::Behaviour>,
@@ -18,7 +18,7 @@ pub(crate) struct NodeBehaviour {
 
 /// libp2p swarm events for our node behaviour
 #[derive(Debug)]
-pub(crate) enum NodeNetworkEvent {
+pub enum NodeNetworkEvent {
     Identify(identify::Event),
     Kademlia(kad::Event),
     Mdns(mdns::Event),

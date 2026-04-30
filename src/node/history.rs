@@ -15,7 +15,7 @@ use ratatui::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) enum LogMessage {
+pub enum LogMessage {
     Swarm { event: SwarmEventInfo, at: f32 },
     Kad { event: KadEventInfo, at: f32 },
     Identify { event: IdentifyEventInfo, at: f32 },
@@ -27,7 +27,7 @@ const ALL_MAX_SIZE: usize = 1000;
 
 /// Wrappers for libp2p Swarm events for easier handling and formatting
 #[derive(Debug, Clone)]
-pub(crate) enum SwarmEventInfo {
+pub enum SwarmEventInfo {
     ConnectionEstablished {
         peer_id: PeerId,
     },
@@ -51,7 +51,7 @@ pub(crate) enum SwarmEventInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum KadEventInfo {
+pub enum KadEventInfo {
     InboundRequest {
         request: InboundRequest,
     },
@@ -80,7 +80,7 @@ pub(crate) enum KadEventInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum IdentifyEventInfo {
+pub enum IdentifyEventInfo {
     Received { peer_id: PeerId, info: Info },
     Sent { peer_id: PeerId },
     Pushed { peer_id: PeerId, info: Info },
@@ -88,14 +88,14 @@ pub(crate) enum IdentifyEventInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum MdnsEventInfo {
+pub enum MdnsEventInfo {
     Discovered { peer_id: PeerId, address: Multiaddr },
     Expired { peer_id: PeerId, address: Multiaddr },
 }
 
 /// Container for the swarm events a node has seen separated by protocol. Includes a timestamp
 #[derive(Default, Debug, Clone)]
-pub(crate) struct MessageHistory {
+pub struct MessageHistory {
     pub identify: VecDeque<(IdentifyEventInfo, f32)>,
     pub kademlia: VecDeque<(KadEventInfo, f32)>,
     pub mdns: VecDeque<(MdnsEventInfo, f32)>,
