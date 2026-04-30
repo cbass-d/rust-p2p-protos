@@ -202,9 +202,7 @@ mod tests {
         };
 
         let handler = handle_lifecycle(
-            LifecycleCommand::Stop {
-                peer_id: peer_one,
-            },
+            LifecycleCommand::Stop { peer_id: peer_one },
             &mut ctx,
             &mut task_set,
         );

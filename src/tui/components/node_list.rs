@@ -305,12 +305,10 @@ impl NodeList {
                 }
                 Lists::External => {}
             },
-            KeyCode::Char('e') => {
-                if !external_nodes.is_empty() {
-                    self.node_list = match self.node_list {
-                        Lists::Internal => Lists::External,
-                        Lists::External => Lists::Internal,
-                    }
+            KeyCode::Char('e') if !external_nodes.is_empty() => {
+                self.node_list = match self.node_list {
+                    Lists::Internal => Lists::External,
+                    Lists::External => Lists::Internal,
                 }
             }
             KeyCode::Enter => {
